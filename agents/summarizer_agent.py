@@ -100,13 +100,13 @@ def generate_alert_summary(signals: list[dict], cfg: Config) -> str:
         crew = Crew(agents=[summarizer], tasks=[task], verbose=False)
         result = crew.kickoff()
         return str(result).strip()
-    finally:
-        # Restore original working directory
-        os.chdir(original_cwd)
     except Exception as e:
         logger.error(f"Error generating summary: {e}", exc_info=True)
         # Fallback to simple format
         return context
+    finally:
+        # Restore original working directory
+        os.chdir(original_cwd)
 
 
 if __name__ == "__main__":

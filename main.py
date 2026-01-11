@@ -59,25 +59,19 @@ def main():
         # Step 2: Fetch news for triggered tickers
         news_by_symbol = fetch_news_for_signals(all_signals, cfg, cfg.sqlite_path)
         
-        # Step 3: Get signals with news from database
-        conn = connect(cfg.sqlite_path)
-        try:
-            signal_ids = [s["signal_id"] for s in all_signals]
-            signals_with_news = []
-            
-            for sig in all_signals:
-                # Get news for this signal
-                signal_data = {
-                    "id": sig["signal_id"],
-                    "symbol": sig["symbol"],
-                    "signal_type": sig["signal"]["signal_type"],
-                    "metrics": sig["signal"]["metrics"],
-                    "severity": sig["signal"]["severity"],
-                    "news": news_by_symbol.get(sig["symbol"], {}).get("direct", [])[:3]
-                }
-                signals_with_news.append(signal_data)
-        finally:
-            conn.close()
+        # Step 3: Build signals with news data
+        signals_with_news = []
+        for sig in all_signals:
+            # Get news for this signal
+            signal_data = {
+                "id": sig["signal_id"],
+                "symbol": sig["symbol"],
+                "signal_type": sig["signal"]["signal_type"],
+                "metrics": sig["signal"]["metrics"],
+                "severity": sig["signal"]["severity"],
+                "news": news_by_symbol.get(sig["symbol"], {}).get("direct", [])[:3]
+            }
+            signals_with_news.append(signal_data)
         
         # Step 4: Generate alert summary using CrewAI
         logger.info("Generating alert summary...")

@@ -64,7 +64,7 @@ class Config:
     alert_email_to: str
     
     # Database
-    sqlite_path: str
+    sqlite_path: str  # Single database for all data
     
     # Logging
     log_level: str
@@ -107,7 +107,7 @@ class Config:
             smtp_user=os.getenv("SMTP_USER", ""),
             smtp_password=os.getenv("SMTP_PASSWORD", ""),
             alert_email_to=os.getenv("ALERT_EMAIL_TO", ""),
-            sqlite_path=os.getenv("SQLITE_PATH", "stock_alerts.db"),
+            sqlite_path=os.getenv("SQLITE_PATH", "database/stock_alerts.db"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             log_file=os.getenv("LOG_FILE", "stock_alerts.log"),
             sector_map=sector_map,

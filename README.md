@@ -101,8 +101,8 @@ SMTP_USER=your_email@gmail.com
 SMTP_PASSWORD=your_app_password
 ALERT_EMAIL_TO=alerts@example.com
 
-# Database
-SQLITE_PATH=stock_alerts.db
+# Database (stored in database/ folder)
+SQLITE_PATH=database/stock_alerts.db
 
 # Logging
 LOG_LEVEL=INFO

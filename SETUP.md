@@ -50,7 +50,7 @@ MIN_ALERT_GAP_MIN=60
 RE_ALERT_STEP_PCT=0.5
 MARKET_OPEN_HOUR=8
 MARKET_CLOSE_HOUR=16
-SQLITE_PATH=stock_alerts.db
+SQLITE_PATH=database/stock_alerts.db
 LOG_LEVEL=INFO
 LOG_FILE=stock_alerts.log
 ```
@@ -93,6 +93,9 @@ Stock-Ayalyst/
 ├── utils/               # Utilities
 │   ├── market_hours.py
 │   └── logging_config.py
+├── database/            # Database files
+│   ├── stock_alerts.db  # Main database
+│   └── state.sqlite     # CrewAI state (auto-created)
 ├── data/                # Data files
 │   └── sector_map.json
 ├── main.py              # Main entry point
@@ -115,5 +118,6 @@ If you hit Twelve Data rate limits, the system will automatically retry with bac
 
 ### Database Issues
 - Database is created automatically on first run
-- Location: `stock_alerts.db` (or configured path)
+- Location: `database/stock_alerts.db` (or configured path)
+- All database files stored in `database/` folder
 - WAL mode enabled for better concurrency

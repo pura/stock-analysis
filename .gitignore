@@ -36,6 +36,11 @@ ENV/
 *.db
 state.sqlite
 stock_alerts.db
+data/*.db
+data/stock_alerts.db
+database/
+database/*.db
+database/*.sqlite
 
 # Logs
 *.log

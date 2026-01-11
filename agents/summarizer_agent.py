@@ -1,6 +1,7 @@
 """CrewAI agent for summarizing alerts."""
 import sys
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -8,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from crewai import Agent, Task, Crew
 from core.config import Config
-from core.database import get_signals_with_news
+# Summarizer doesn't need database access - works with provided signals
 from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -88,11 +89,20 @@ def generate_alert_summary(signals: list[dict], cfg: Config) -> str:
         agent=summarizer,
     )
     
-    crew = Crew(agents=[summarizer], tasks=[task], verbose=False)
+    # Configure CrewAI to use database folder for state.sqlite
+    database_dir = Path("database")
+    database_dir.mkdir(exist_ok=True)
+    original_cwd = os.getcwd()
     
     try:
+        # Change to database directory so CrewAI creates state.sqlite there
+        os.chdir(database_dir)
+        crew = Crew(agents=[summarizer], tasks=[task], verbose=False)
         result = crew.kickoff()
         return str(result).strip()
+    finally:
+        # Restore original working directory
+        os.chdir(original_cwd)
     except Exception as e:
         logger.error(f"Error generating summary: {e}", exc_info=True)
         # Fallback to simple format

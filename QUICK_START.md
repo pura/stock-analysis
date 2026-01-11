@@ -64,7 +64,7 @@ SMTP_PORT=587
 SMTP_USER=myemail@gmail.com
 SMTP_PASSWORD=abcd efgh ijkl mnop
 ALERT_EMAIL_TO=alerts@mycompany.com
-SQLITE_PATH=stock_alerts.db
+SQLITE_PATH=database/stock_alerts.db
 LOG_LEVEL=INFO
 LOG_FILE=stock_alerts.log
 ```
@@ -194,12 +194,12 @@ Schedule: Every 30 minutes, Mon-Fri, 8 AM - 4 PM
 
 2. **Check database:**
    ```bash
-   sqlite3 stock_alerts.db "SELECT COUNT(*) FROM ohlc_daily;"
+   sqlite3 database/stock_alerts.db "SELECT COUNT(*) FROM ohlc_daily;"
    ```
 
 3. **Check for signals:**
    ```bash
-   sqlite3 stock_alerts.db "SELECT symbol, signal_type, datetime FROM signals ORDER BY datetime DESC LIMIT 10;"
+   sqlite3 database/stock_alerts.db "SELECT symbol, signal_type, datetime FROM signals ORDER BY datetime DESC LIMIT 10;"
    ```
 
 ## Troubleshooting
@@ -231,7 +231,7 @@ Schedule: Every 30 minutes, Mon-Fri, 8 AM - 4 PM
 ### Database errors
 - Make sure you have write permissions in the project directory
 - Check `SQLITE_PATH` in `.env` is correct
-- Delete `stock_alerts.db` and re-run backfill if corrupted
+- Delete `database/stock_alerts.db` and re-run backfill if corrupted
 
 ## Configuration Reference
 
@@ -250,7 +250,7 @@ Schedule: Every 30 minutes, Mon-Fri, 8 AM - 4 PM
 | `RE_ALERT_STEP_PCT` | No | 0.5 | % for re-alert |
 | `MARKET_OPEN_HOUR` | No | 8 | Market open (24h) |
 | `MARKET_CLOSE_HOUR` | No | 16 | Market close (24h) |
-| `SQLITE_PATH` | No | stock_alerts.db | Database file |
+| `SQLITE_PATH` | No | database/stock_alerts.db | Main database (all tables) |
 | `LOG_LEVEL` | No | INFO | Logging level |
 | `LOG_FILE` | No | stock_alerts.log | Log file path |
 
@@ -266,6 +266,6 @@ Schedule: Every 30 minutes, Mon-Fri, 8 AM - 4 PM
 ## Support
 
 - Check logs: `tail -f stock_alerts.log`
-- Review database: `sqlite3 stock_alerts.db`
+- Review database: `sqlite3 database/stock_alerts.db`
 - Test email: Modify `main.py` temporarily to force an alert
 - Adjust thresholds: Lower `MOVE_PCT` for more alerts, raise for fewer

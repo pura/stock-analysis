@@ -16,10 +16,10 @@ from utils.logging_config import setup_logging
 logger = logging.getLogger(__name__)
 
 
-def get_day_open(symbol: str, conn, today: str) -> float:
+def get_day_open(symbol: str, db_path: str, today: str) -> float:
     """Get today's opening price."""
     # Try to get from daily OHLC first
-    daily = get_daily_ohlc(conn, symbol, today)
+    daily = get_daily_ohlc(db_path, symbol, today)
     if daily:
         return daily["open"]
     
@@ -28,7 +28,7 @@ def get_day_open(symbol: str, conn, today: str) -> float:
 
 
 def should_alert(
-    conn,
+    db_path: str,
     symbol: str,
     signal: dict,
     current_price: float,
@@ -37,7 +37,7 @@ def should_alert(
     move_pct: float
 ) -> bool:
     """Check if alert should be sent based on throttling rules."""
-    last_alert = get_last_alert(conn, symbol)
+    last_alert = get_last_alert(db_path, symbol)
     
     if not last_alert or not last_alert.get("last_alert_at"):
         return True  # First alert
@@ -84,7 +84,6 @@ def monitor_symbol(
     cfg: Config
 ) -> list[dict]:
     """Monitor one symbol and return detected signals."""
-    conn = connect(db_path)
     try:
         # Fetch intraday bars (30min interval, last 50 bars)
         bars = fetch_time_series(api_key, symbol, "30min", 50)
@@ -95,7 +94,7 @@ def monitor_symbol(
         
         # Get today's open
         today = get_today_date()
-        day_open = get_day_open(symbol, conn, today)
+        day_open = get_day_open(symbol, db_path, today)
         
         # If no daily OHLC, try to get from first intraday bar of today
         if day_open == 0:
@@ -126,7 +125,7 @@ def monitor_symbol(
         
         for signal in signals:
             signal_id = store_signal(
-                conn,
+                db_path,
                 symbol,
                 bars[-1].get("datetime", ""),
                 signal["signal_type"],
@@ -135,7 +134,7 @@ def monitor_symbol(
                 signal.get("bar_id")
             )
             
-            if signal_id and should_alert(conn, symbol, signal, latest_price,
+            if signal_id and should_alert(db_path, symbol, signal, latest_price,
                                          cfg.min_alert_gap_min, cfg.re_alert_step_pct, cfg.move_pct):
                 alertable_signals.append({
                     "signal_id": signal_id,
@@ -145,15 +144,13 @@ def monitor_symbol(
                 })
                 # Update alert log
                 direction = signal["metrics"].get("direction", "up" if signal["metrics"].get("pct_change", 0) > 0 else "down")
-                update_alert_log(conn, symbol, latest_price, direction, signal["severity"])
+                update_alert_log(db_path, symbol, latest_price, direction, signal["severity"])
         
         return alertable_signals
         
     except Exception as e:
         logger.error(f"Error monitoring {symbol}: {e}", exc_info=True)
         return []
-    finally:
-        conn.close()
 
 
 def main():

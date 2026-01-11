@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from typing import Optional, Any
 from core.config import Config
-from core.database import connect, store_news_item, link_signal_news
+from core.database import store_news_item, link_signal_news
 from core.tools import fetch_google_news
 from utils.logging_config import setup_logging
 
@@ -28,7 +28,6 @@ def fetch_news_for_symbol(
     signal_id: int
 ) -> dict[str, Any]:
     """Fetch and store news for a symbol."""
-    conn = connect(db_path)
     try:
         news_items = {
             "direct": [],
@@ -48,7 +47,7 @@ def fetch_news_for_symbol(
             for item in items:
                 url_hash = hash_url(item["url"])
                 news_id = store_news_item(
-                    conn,
+                    db_path,
                     item["title"],
                     item["url"],
                     item.get("published_at"),
@@ -57,7 +56,7 @@ def fetch_news_for_symbol(
                     url_hash
                 )
                 if news_id:
-                    link_signal_news(conn, signal_id, news_id, "direct")
+                    link_signal_news(db_path, signal_id, news_id, "direct")
                     news_items["direct"].append(item)
         
         # Sector query
@@ -67,7 +66,7 @@ def fetch_news_for_symbol(
             for item in items:
                 url_hash = hash_url(item["url"])
                 news_id = store_news_item(
-                    conn,
+                    db_path,
                     item["title"],
                     item["url"],
                     item.get("published_at"),
@@ -76,7 +75,7 @@ def fetch_news_for_symbol(
                     url_hash
                 )
                 if news_id:
-                    link_signal_news(conn, signal_id, news_id, "sector_macro")
+                    link_signal_news(db_path, signal_id, news_id, "sector_macro")
                     news_items["sector_macro"].append(item)
         
         # Macro queries
@@ -92,7 +91,7 @@ def fetch_news_for_symbol(
             for item in items:
                 url_hash = hash_url(item["url"])
                 news_id = store_news_item(
-                    conn,
+                    db_path,
                     item["title"],
                     item["url"],
                     item.get("published_at"),
@@ -101,22 +100,20 @@ def fetch_news_for_symbol(
                     url_hash
                 )
                 if news_id:
-                    link_signal_news(conn, signal_id, news_id, "sector_macro")
+                    link_signal_news(db_path, signal_id, news_id, "sector_macro")
                     news_items["sector_macro"].append(item)
         
         if news_items["direct"] or news_items["sector_macro"]:
             news_items["none_found"] = False
         else:
             # Store none_found marker
-            link_signal_news(conn, signal_id, 0, "none_found")
+            link_signal_news(db_path, signal_id, 0, "none_found")
         
         return news_items
         
     except Exception as e:
         logger.error(f"Error fetching news for {symbol}: {e}", exc_info=True)
         return {"direct": [], "sector_macro": [], "none_found": True}
-    finally:
-        conn.close()
 
 
 def fetch_news_for_signals(

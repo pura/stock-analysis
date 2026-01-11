@@ -40,7 +40,7 @@ def backfill_symbol(api_key: str, symbol: str, days: int, db_path: str) -> bool:
         bars = fetch_time_series(api_key, symbol, "1day", min(days, 5000))
         
         if not bars:
-            log_ingestion(conn, symbol, "failed", 0, 
+            log_ingestion(db_path, symbol, "failed", 0, 
                          start_date.strftime("%Y-%m-%d"),
                          end_date.strftime("%Y-%m-%d"),
                          "No data returned from API")
@@ -54,7 +54,7 @@ def backfill_symbol(api_key: str, symbol: str, days: int, db_path: str) -> bool:
                 continue
             
             stored += store_daily_ohlc(
-                conn,
+                db_path,
                 symbol,
                 date_str,
                 float(bar.get("open", 0)),
@@ -64,7 +64,7 @@ def backfill_symbol(api_key: str, symbol: str, days: int, db_path: str) -> bool:
                 float(bar.get("volume", 0))
             )
         
-        log_ingestion(conn, symbol, "success", stored,
+        log_ingestion(db_path, symbol, "success", stored,
                      start_date.strftime("%Y-%m-%d"),
                      end_date.strftime("%Y-%m-%d"))
         
@@ -73,7 +73,7 @@ def backfill_symbol(api_key: str, symbol: str, days: int, db_path: str) -> bool:
         
     except Exception as e:
         logger.error(f"Error backfilling {symbol}: {e}", exc_info=True)
-        log_ingestion(conn, symbol, "error", 0, error_message=str(e))
+        log_ingestion(db_path, symbol, "error", 0, error_message=str(e))
         return False
     finally:
         conn.close()

@@ -6,8 +6,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Single database schema with all tables
 SCHEMA = """
--- Daily OHLC data
+-- Daily OHLC data (historical/backfill)
 CREATE TABLE IF NOT EXISTS ohlc_daily (
   symbol TEXT NOT NULL,
   date TEXT NOT NULL,
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS ohlc_daily (
 CREATE INDEX IF NOT EXISTS idx_ohlc_daily_symbol_date 
   ON ohlc_daily(symbol, date DESC);
 
--- Ingestion log
+-- Ingestion log (backfill tracking)
 CREATE TABLE IF NOT EXISTS ingestion_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   symbol TEXT NOT NULL,
@@ -90,7 +91,9 @@ CREATE TABLE IF NOT EXISTS signal_news_links (
 
 
 def connect(db_path: str) -> sqlite3.Connection:
-    """Connect to database and initialize schema."""
+    """Connect to database and initialize all tables."""
+    from pathlib import Path
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.executescript(SCHEMA)
@@ -98,7 +101,7 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 
 def store_daily_ohlc(
-    conn: sqlite3.Connection,
+    db_path: str,
     symbol: str,
     date: str,
     open_price: float,
@@ -109,6 +112,7 @@ def store_daily_ohlc(
     source: str = "twelve_data"
 ) -> int:
     """Store daily OHLC data."""
+    conn = connect(db_path)
     try:
         conn.execute(
             """INSERT OR REPLACE INTO ohlc_daily 
@@ -121,40 +125,46 @@ def store_daily_ohlc(
     except Exception as e:
         logger.error(f"Error storing OHLC for {symbol} on {date}: {e}")
         return 0
+    finally:
+        conn.close()
 
 
 def get_daily_ohlc(
-    conn: sqlite3.Connection,
+    db_path: str,
     symbol: str,
     date: Optional[str] = None
 ) -> Optional[dict[str, Any]]:
     """Get daily OHLC for symbol and date."""
-    if date:
-        cur = conn.execute(
-            "SELECT * FROM ohlc_daily WHERE symbol=? AND date=?",
-            (symbol, date)
-        )
-    else:
-        cur = conn.execute(
-            "SELECT * FROM ohlc_daily WHERE symbol=? ORDER BY date DESC LIMIT 1",
-            (symbol,)
-        )
-    row = cur.fetchone()
-    if row:
-        return {
-            "symbol": row[0],
-            "date": row[1],
-            "open": row[2],
-            "high": row[3],
-            "low": row[4],
-            "close": row[5],
-            "volume": row[6],
-        }
-    return None
+    conn = connect(db_path)
+    try:
+        if date:
+            cur = conn.execute(
+                "SELECT * FROM ohlc_daily WHERE symbol=? AND date=?",
+                (symbol, date)
+            )
+        else:
+            cur = conn.execute(
+                "SELECT * FROM ohlc_daily WHERE symbol=? ORDER BY date DESC LIMIT 1",
+                (symbol,)
+            )
+        row = cur.fetchone()
+        if row:
+            return {
+                "symbol": row[0],
+                "date": row[1],
+                "open": row[2],
+                "high": row[3],
+                "low": row[4],
+                "close": row[5],
+                "volume": row[6],
+            }
+        return None
+    finally:
+        conn.close()
 
 
 def log_ingestion(
-    conn: sqlite3.Connection,
+    db_path: str,
     symbol: str,
     status: str,
     records_ingested: int = 0,
@@ -163,17 +173,21 @@ def log_ingestion(
     error_message: Optional[str] = None
 ):
     """Log ingestion attempt."""
-    conn.execute(
-        """INSERT INTO ingestion_log 
-           (symbol, date_range_start, date_range_end, status, records_ingested, error_message, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (symbol, date_range_start, date_range_end, status, records_ingested, error_message, datetime.utcnow().isoformat())
-    )
-    conn.commit()
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            """INSERT INTO ingestion_log 
+               (symbol, date_range_start, date_range_end, status, records_ingested, error_message, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, date_range_start, date_range_end, status, records_ingested, error_message, datetime.utcnow().isoformat())
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def store_signal(
-    conn: sqlite3.Connection,
+    db_path: str,
     symbol: str,
     datetime_str: str,
     signal_type: str,
@@ -183,6 +197,7 @@ def store_signal(
 ) -> Optional[int]:
     """Store signal. Returns signal_id if inserted, None if duplicate."""
     import json
+    conn = connect(db_path)
     try:
         cur = conn.execute(
             """INSERT INTO signals (symbol, datetime, signal_type, metrics_json, severity, created_at, bar_id)
@@ -197,45 +212,55 @@ def store_signal(
     except Exception as e:
         logger.error(f"Error storing signal: {e}")
         return None
+    finally:
+        conn.close()
 
 
-def get_last_alert(conn: sqlite3.Connection, symbol: str) -> Optional[dict[str, Any]]:
+def get_last_alert(db_path: str, symbol: str) -> Optional[dict[str, Any]]:
     """Get last alert info for symbol."""
-    cur = conn.execute(
-        "SELECT * FROM alert_log WHERE symbol=?",
-        (symbol,)
-    )
-    row = cur.fetchone()
-    if row:
-        return {
-            "symbol": row[0],
-            "last_alert_at": row[1],
-            "last_alert_price": row[2],
-            "last_alert_direction": row[3],
-            "last_alert_severity": row[4],
-        }
-    return None
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT * FROM alert_log WHERE symbol=?",
+            (symbol,)
+        )
+        row = cur.fetchone()
+        if row:
+            return {
+                "symbol": row[0],
+                "last_alert_at": row[1],
+                "last_alert_price": row[2],
+                "last_alert_direction": row[3],
+                "last_alert_severity": row[4],
+            }
+        return None
+    finally:
+        conn.close()
 
 
 def update_alert_log(
-    conn: sqlite3.Connection,
+    db_path: str,
     symbol: str,
     price: float,
     direction: str,
     severity: str
 ):
     """Update alert log."""
-    conn.execute(
-        """INSERT OR REPLACE INTO alert_log 
-           (symbol, last_alert_at, last_alert_price, last_alert_direction, last_alert_severity)
-           VALUES (?, ?, ?, ?, ?)""",
-        (symbol, datetime.utcnow().isoformat(), price, direction, severity)
-    )
-    conn.commit()
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO alert_log 
+               (symbol, last_alert_at, last_alert_price, last_alert_direction, last_alert_severity)
+               VALUES (?, ?, ?, ?, ?)""",
+            (symbol, datetime.utcnow().isoformat(), price, direction, severity)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def store_news_item(
-    conn: sqlite3.Connection,
+    db_path: str,
     title: str,
     url: str,
     published_at: Optional[str],
@@ -244,6 +269,7 @@ def store_news_item(
     url_hash: str
 ) -> int:
     """Store news item. Returns news_id."""
+    conn = connect(db_path)
     try:
         cur = conn.execute(
             """INSERT OR IGNORE INTO news_items 
@@ -261,15 +287,18 @@ def store_news_item(
     except Exception as e:
         logger.error(f"Error storing news item: {e}")
         return 0
+    finally:
+        conn.close()
 
 
 def link_signal_news(
-    conn: sqlite3.Connection,
+    db_path: str,
     signal_id: int,
     news_id: int,
     relevance_label: str
 ):
     """Link signal to news item."""
+    conn = connect(db_path)
     try:
         conn.execute(
             """INSERT OR IGNORE INTO signal_news_links (signal_id, news_id, relevance_label)
@@ -279,59 +308,65 @@ def link_signal_news(
         conn.commit()
     except Exception as e:
         logger.error(f"Error linking signal-news: {e}")
+    finally:
+        conn.close()
 
 
 def get_signals_with_news(
-    conn: sqlite3.Connection,
+    db_path: str,
     since: Optional[str] = None
 ) -> list[dict[str, Any]]:
     """Get signals with linked news."""
     import json
-    if since:
-        cur = conn.execute(
-            """SELECT s.id, s.symbol, s.datetime, s.signal_type, s.metrics_json, s.severity,
-                      GROUP_CONCAT(n.title || '|' || n.url || '|' || snl.relevance_label, '|||') as news
-               FROM signals s
-               LEFT JOIN signal_news_links snl ON s.id = snl.signal_id
-               LEFT JOIN news_items n ON snl.news_id = n.id
-               WHERE s.datetime >= ?
-               GROUP BY s.id
-               ORDER BY s.datetime DESC""",
-            (since,)
-        )
-    else:
-        cur = conn.execute(
-            """SELECT s.id, s.symbol, s.datetime, s.signal_type, s.metrics_json, s.severity,
-                      GROUP_CONCAT(n.title || '|' || n.url || '|' || snl.relevance_label, '|||') as news
-               FROM signals s
-               LEFT JOIN signal_news_links snl ON s.id = snl.signal_id
-               LEFT JOIN news_items n ON snl.news_id = n.id
-               GROUP BY s.id
-               ORDER BY s.datetime DESC
-               LIMIT 50""",
-        )
-    
-    results = []
-    for row in cur.fetchall():
-        news_data = []
-        if row[6]:  # news column
-            for news_str in row[6].split("|||"):
-                parts = news_str.split("|")
-                if len(parts) >= 3:
-                    news_data.append({
-                        "title": parts[0],
-                        "url": parts[1],
-                        "relevance": parts[2]
-                    })
+    conn = connect(db_path)
+    try:
+        if since:
+            cur = conn.execute(
+                """SELECT s.id, s.symbol, s.datetime, s.signal_type, s.metrics_json, s.severity,
+                          GROUP_CONCAT(n.title || '|' || n.url || '|' || snl.relevance_label, '|||') as news
+                   FROM signals s
+                   LEFT JOIN signal_news_links snl ON s.id = snl.signal_id
+                   LEFT JOIN news_items n ON snl.news_id = n.id
+                   WHERE s.datetime >= ?
+                   GROUP BY s.id
+                   ORDER BY s.datetime DESC""",
+                (since,)
+            )
+        else:
+            cur = conn.execute(
+                """SELECT s.id, s.symbol, s.datetime, s.signal_type, s.metrics_json, s.severity,
+                          GROUP_CONCAT(n.title || '|' || n.url || '|' || snl.relevance_label, '|||') as news
+                   FROM signals s
+                   LEFT JOIN signal_news_links snl ON s.id = snl.signal_id
+                   LEFT JOIN news_items n ON snl.news_id = n.id
+                   GROUP BY s.id
+                   ORDER BY s.datetime DESC
+                   LIMIT 50""",
+            )
         
-        results.append({
-            "id": row[0],
-            "symbol": row[1],
-            "datetime": row[2],
-            "signal_type": row[3],
-            "metrics": json.loads(row[4]),
-            "severity": row[5],
-            "news": news_data
-        })
-    
-    return results
+        results = []
+        for row in cur.fetchall():
+            news_data = []
+            if row[6]:  # news column
+                for news_str in row[6].split("|||"):
+                    parts = news_str.split("|")
+                    if len(parts) >= 3:
+                        news_data.append({
+                            "title": parts[0],
+                            "url": parts[1],
+                            "relevance": parts[2]
+                        })
+            
+            results.append({
+                "id": row[0],
+                "symbol": row[1],
+                "datetime": row[2],
+                "signal_type": row[3],
+                "metrics": json.loads(row[4]),
+                "severity": row[5],
+                "news": news_data
+            })
+        
+        return results
+    finally:
+        conn.close()

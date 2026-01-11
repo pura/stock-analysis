@@ -87,6 +87,20 @@ CREATE TABLE IF NOT EXISTS signal_news_links (
   FOREIGN KEY(signal_id) REFERENCES signals(id),
   FOREIGN KEY(news_id) REFERENCES news_items(id)
 );
+
+-- Historical OHLC-News links (for backfilled data analysis)
+CREATE TABLE IF NOT EXISTS ohlc_news_links (
+  symbol TEXT NOT NULL,
+  date TEXT NOT NULL,
+  news_id INTEGER NOT NULL,
+  relevance_label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(symbol, date, news_id),
+  FOREIGN KEY(news_id) REFERENCES news_items(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ohlc_news_links_symbol_date 
+  ON ohlc_news_links(symbol, date DESC);
 """
 
 
@@ -364,6 +378,90 @@ def get_signals_with_news(
                 "signal_type": row[3],
                 "metrics": json.loads(row[4]),
                 "severity": row[5],
+                "news": news_data
+            })
+        
+        return results
+    finally:
+        conn.close()
+
+
+def link_ohlc_news(
+    db_path: str,
+    symbol: str,
+    date: str,
+    news_id: int,
+    relevance_label: str = "historical"
+):
+    """Link news item to historical OHLC record."""
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            """INSERT OR IGNORE INTO ohlc_news_links 
+               (symbol, date, news_id, relevance_label, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (symbol, date, news_id, relevance_label, datetime.utcnow().isoformat())
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error linking OHLC-news: {e}")
+    finally:
+        conn.close()
+
+
+def get_ohlc_with_news(
+    db_path: str,
+    symbol: Optional[str] = None,
+    min_change_pct: Optional[float] = None
+) -> list[dict[str, Any]]:
+    """Get OHLC records with linked news. Optionally filter by symbol and min change %."""
+    conn = connect(db_path)
+    try:
+        query = """
+            SELECT o.symbol, o.date, o.open, o.close, 
+                   ABS((o.close - o.open) / o.open * 100) as change_pct,
+                   GROUP_CONCAT(n.title || '|' || n.url || '|' || onl.relevance_label, '|||') as news
+            FROM ohlc_daily o
+            LEFT JOIN ohlc_news_links onl ON o.symbol = onl.symbol AND o.date = onl.date
+            LEFT JOIN news_items n ON onl.news_id = n.id
+        """
+        conditions = []
+        params = []
+        
+        if symbol:
+            conditions.append("o.symbol = ?")
+            params.append(symbol)
+        
+        if min_change_pct is not None:
+            conditions.append("ABS((o.close - o.open) / o.open * 100) >= ?")
+            params.append(min_change_pct)
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        query += " GROUP BY o.symbol, o.date ORDER BY o.date DESC"
+        
+        cur = conn.execute(query, params)
+        
+        results = []
+        for row in cur.fetchall():
+            news_data = []
+            if row[5]:  # news column
+                for news_str in row[5].split("|||"):
+                    parts = news_str.split("|")
+                    if len(parts) >= 3:
+                        news_data.append({
+                            "title": parts[0],
+                            "url": parts[1],
+                            "relevance": parts[2]
+                        })
+            
+            results.append({
+                "symbol": row[0],
+                "date": row[1],
+                "open": row[2],
+                "close": row[3],
+                "change_pct": row[4],
                 "news": news_data
             })
         

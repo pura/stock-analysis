@@ -1,6 +1,6 @@
 """Configuration management."""
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
 import os
 import json
 from pathlib import Path
@@ -73,6 +73,9 @@ class Config:
     # Sector Map
     sector_map: dict[str, str]
     
+    # News Sources (optional, loaded from data/news_sources.json)
+    news_sources: Optional[dict[str, Any]] = None
+    
     @classmethod
     def from_env(cls) -> "Config":
         """Load configuration from environment."""
@@ -88,6 +91,16 @@ class Config:
             try:
                 with open(sector_map_path) as f:
                     sector_map = json.load(f)
+            except Exception:
+                pass
+        
+        # Load news sources (optional)
+        news_sources_path = Path("data/news_sources.json")
+        news_sources = {}
+        if news_sources_path.exists():
+            try:
+                with open(news_sources_path) as f:
+                    news_sources = json.load(f)
             except Exception:
                 pass
         
@@ -111,4 +124,5 @@ class Config:
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             log_file=os.getenv("LOG_FILE", "stock_alerts.log"),
             sector_map=sector_map,
+            news_sources=news_sources if news_sources else None,
         )

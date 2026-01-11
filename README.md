@@ -10,6 +10,7 @@ A low-noise stock monitoring system using CrewAI and Twelve Data API with determ
 - **Deterministic signals**: Price moves, volume spikes, breakouts/breakdowns
 - **Noise control**: Smart throttling and cooldown mechanisms
 - **News context**: Automatic news fetching for triggered tickers only
+- **Historical news analysis**: Analyzes backfilled data and fetches news for significant price moves (>=5%)
 - **AI summarization**: CrewAI-powered alert generation
 - **Email alerts**: Configurable email delivery
 
@@ -131,6 +132,20 @@ python -m agents.backfill_agent
 
 This downloads and stores 1 year of daily OHLC data for all tickers in your watchlist.
 
+### 4a. (Optional) Analyze Historical News
+
+After backfilling, you can analyze historical data and fetch news for days with significant price moves (>=5%):
+
+```bash
+python -m agents.historical_news_agent
+```
+
+This will:
+- Scan all backfilled OHLC data
+- Find days where daily change >= 5%
+- Fetch news articles from those dates
+- Link news to the historical OHLC records in the database
+
 ### 5. Start Monitoring
 
 For development/testing:
@@ -156,11 +171,12 @@ For production, use cron:
 Stock-Ayalyst/
 ├── agents/
 │   ├── __init__.py
-│   ├── backfill_agent.py      # Historical OHLC backfill
-│   ├── monitor_agent.py        # Intraday price monitoring
-│   ├── news_agent.py           # News fetching for triggered tickers
-│   ├── summarizer_agent.py    # CrewAI alert summarization
-│   └── eod_agent.py            # End-of-day processing
+│   ├── backfill_agent.py         # Historical OHLC backfill
+│   ├── monitor_agent.py          # Intraday price monitoring
+│   ├── news_agent.py             # News fetching for triggered tickers
+│   ├── historical_news_agent.py  # Historical news analysis for significant moves
+│   ├── summarizer_agent.py       # CrewAI alert summarization
+│   └── eod_agent.py              # End-of-day processing
 ├── core/
 │   ├── __init__.py
 │   ├── config.py               # Configuration management

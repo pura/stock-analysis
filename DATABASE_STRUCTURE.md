@@ -112,6 +112,20 @@ CREATE TABLE signal_news_links (
   FOREIGN KEY(signal_id) REFERENCES signals(id),
   FOREIGN KEY(news_id) REFERENCES news_items(id)
 );
+
+-- Historical OHLC-News links (for backfilled data analysis)
+CREATE TABLE ohlc_news_links (
+  symbol TEXT NOT NULL,
+  date TEXT NOT NULL,
+  news_id INTEGER NOT NULL,
+  relevance_label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(symbol, date, news_id),
+  FOREIGN KEY(news_id) REFERENCES news_items(id)
+);
+
+CREATE INDEX idx_ohlc_news_links_symbol_date 
+  ON ohlc_news_links(symbol, date DESC);
 ```
 
 ## Table Usage
@@ -140,6 +154,10 @@ CREATE TABLE signal_news_links (
 - **`signal_news_links`**: Links between signals and news
   - Used by: `agents/news_agent.py`
   - Read by: `agents/summarizer_agent.py`, `main.py`
+
+- **`ohlc_news_links`**: Links between historical OHLC records and news
+  - Used by: `agents/historical_news_agent.py`
+  - Read by: `agents/historical_news_agent.py` (for querying linked news)
 
 ## Configuration
 

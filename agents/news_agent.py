@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from typing import Optional, Any
 from core.config import Config
 from core.database import store_news_item, link_signal_news
-from core.tools import fetch_google_news
+from core.tools import fetch_google_news, fetch_news_from_sources, matches_symbol
 from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,8 @@ def fetch_news_for_symbol(
     symbol: str,
     sector: Optional[str],
     db_path: str,
-    signal_id: int
+    signal_id: int,
+    use_predefined_sources: bool = True
 ) -> dict[str, Any]:
     """Fetch and store news for a symbol."""
     try:
@@ -35,29 +36,66 @@ def fetch_news_for_symbol(
             "none_found": True
         }
         
-        # Direct company queries
-        queries = [
-            f"{symbol} stock",
-            f"{symbol} earnings",
-            f"{symbol} news",
-        ]
+        # First, try predefined news sources (RSS feeds from financial sites)
+        # Fetch company-specific news AND global/macro events
+        if use_predefined_sources:
+            predefined_items = fetch_news_from_sources(
+                symbol=symbol,
+                sector=sector,
+                limit_per_source=3,
+                require_symbol_match=False  # Get both company-specific AND global events
+            )
+            
+            for item in predefined_items:
+                # Include if:
+                # 1. It matches the company name (company-specific news)
+                # 2. OR it's a global/macro event (applies to all stocks)
+                is_company_match = matches_symbol(item, symbol) if symbol else False
+                is_global_event = item.get("applies_to_all_stocks", False)
+                
+                if is_company_match or is_global_event:
+                    url_hash = hash_url(item["url"])
+                    relevance = "direct" if is_company_match else "macro_global"
+                    news_id = store_news_item(
+                        db_path,
+                        item["title"],
+                        item["url"],
+                        item.get("published_at"),
+                        item.get("source_name") or item.get("source", ""),
+                        f"predefined_{item.get('source_type', 'unknown')}",
+                        url_hash
+                    )
+                    if news_id:
+                        link_signal_news(db_path, signal_id, news_id, relevance)
+                        if relevance == "direct":
+                            news_items["direct"].append(item)
+                        else:
+                            news_items["sector_macro"].append(item)
         
-        for query in queries:
-            items = fetch_google_news(query, limit=5)
-            for item in items:
-                url_hash = hash_url(item["url"])
-                news_id = store_news_item(
-                    db_path,
-                    item["title"],
-                    item["url"],
-                    item.get("published_at"),
-                    item.get("source"),
-                    query,
-                    url_hash
-                )
-                if news_id:
-                    link_signal_news(db_path, signal_id, news_id, "direct")
-                    news_items["direct"].append(item)
+        # Fallback: Direct company queries via Google News
+        if len(news_items["direct"]) < 5:
+            queries = [
+                f"{symbol} stock",
+                f"{symbol} earnings",
+                f"{symbol} news",
+            ]
+            
+            for query in queries:
+                items = fetch_google_news(query, limit=5)
+                for item in items:
+                    url_hash = hash_url(item["url"])
+                    news_id = store_news_item(
+                        db_path,
+                        item["title"],
+                        item["url"],
+                        item.get("published_at"),
+                        item.get("source"),
+                        query,
+                        url_hash
+                    )
+                    if news_id:
+                        link_signal_news(db_path, signal_id, news_id, "direct")
+                        news_items["direct"].append(item)
         
         # Sector query
         if sector:

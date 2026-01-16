@@ -159,7 +159,26 @@ def load_news_sources() -> dict[str, Any]:
     
     try:
         with open(sources_path) as f:
-            return json.load(f)
+            data = json.load(f)
+            
+            # Handle both old and new JSON structure
+            if "news_sources" in data:
+                # New structure: data.news_sources.*
+                news_sources = data["news_sources"]
+                return {
+                    "financial_news_sites": news_sources.get("general_financial", []),
+                    "stock_specific_sources": news_sources.get("stock_specific", {}),
+                    "sector_sources": news_sources.get("sector_specific", {}),
+                    "macro_economic_sources": news_sources.get("macro_economic", [])
+                }
+            else:
+                # Old structure: direct keys
+                return {
+                    "financial_news_sites": data.get("financial_news_sites", []),
+                    "stock_specific_sources": data.get("stock_specific_sources", {}),
+                    "sector_sources": data.get("sector_sources", {}),
+                    "macro_economic_sources": data.get("macro_economic_sources", [])
+                }
     except Exception as e:
         logger.error(f"Error loading news sources: {e}")
         return {
@@ -286,8 +305,8 @@ def fetch_news_from_sources(
             try:
                 items = fetch_rss_feed(source["rss_url"], limit=limit_per_source * 2)
                 for item in items:
-                    item["source_name"] = source["name"]
-                    item["source_type"] = source["type"]
+                    item["source_name"] = source.get("name", "Unknown")
+                    item["source_type"] = source.get("type", "company_specific")
                     # Filter by date range if provided
                     if date_filter:
                         pub_date = item.get("published_at", "")
@@ -299,7 +318,7 @@ def fetch_news_from_sources(
                     all_items.append(item)
                 time.sleep(0.3)
             except Exception as e:
-                logger.warning(f"Error fetching from {source['name']}: {e}")
+                logger.warning(f"Error fetching from {source.get('name', 'Unknown')}: {e}")
     
     # Fetch from sector-specific sources (if symbol matches)
     if sector and sector in sources_config.get("sector_sources", {}):
@@ -307,8 +326,8 @@ def fetch_news_from_sources(
             try:
                 items = fetch_rss_feed(source["rss_url"], limit=limit_per_source * 2)
                 for item in items:
-                    item["source_name"] = source["name"]
-                    item["source_type"] = source["type"]
+                    item["source_name"] = source.get("name", "Unknown")
+                    item["source_type"] = source.get("type", "sector_specific")
                     # Filter by date range if provided
                     if date_filter:
                         pub_date = item.get("published_at", "")
@@ -320,7 +339,7 @@ def fetch_news_from_sources(
                     all_items.append(item)
                 time.sleep(0.3)
             except Exception as e:
-                logger.warning(f"Error fetching from {source['name']}: {e}")
+                logger.warning(f"Error fetching from {source.get('name', 'Unknown')}: {e}")
     
     # Only fetch from general financial news sites if we need more results
     # AND we're not requiring strict symbol matching (or if symbol is provided, filter strictly)
@@ -329,8 +348,8 @@ def fetch_news_from_sources(
             try:
                 items = fetch_rss_feed(source["rss_url"], limit=limit_per_source * 2)
                 for item in items:
-                    item["source_name"] = source["name"]
-                    item["source_type"] = source["type"]
+                    item["source_name"] = source.get("name", "Unknown")
+                    item["source_type"] = source.get("type", "general_financial")
                     # Filter by date range if provided
                     if date_filter:
                         pub_date = item.get("published_at", "")
@@ -342,7 +361,7 @@ def fetch_news_from_sources(
                     all_items.append(item)
                 time.sleep(0.3)  # Rate limiting
             except Exception as e:
-                logger.warning(f"Error fetching from {source['name']}: {e}")
+                logger.warning(f"Error fetching from {source.get('name', 'Unknown')}: {e}")
     
     # ALWAYS fetch from macro-economic sources (diseases, wars, economic events)
     # These affect all stocks even if they don't mention the company
@@ -351,7 +370,7 @@ def fetch_news_from_sources(
         try:
             items = fetch_rss_feed(source["rss_url"], limit=limit_per_source)
             for item in items:
-                item["source_name"] = source["name"]
+                item["source_name"] = source.get("name", "Unknown")
                 item["source_type"] = "macro_global"  # Special type for global events
                 item["applies_to_all_stocks"] = True  # Flag to indicate this applies to all stocks
                 # Filter by date range if provided

@@ -4,7 +4,7 @@
 
 The system uses a **single SQLite database** stored in the `database/` folder:
 
-- **Main Database** (`database/stock_alerts.db`) - Contains all tables for historical OHLC data, signals, alerts, and news
+- **Main Database** (`database/stock_analysis.db`) - Contains all tables for historical OHLC data, signals, alerts, and news
 - **CrewAI State** (`database/state.sqlite`) - CrewAI's internal state file (auto-created)
 
 This single database approach provides:
@@ -16,7 +16,7 @@ This single database approach provides:
 
 ## Database Location
 
-**Path:** `database/stock_alerts.db` (configurable via `SQLITE_PATH`)
+**Path:** `database/stock_analysis.db` (configurable via `SQLITE_PATH`)
 
 All database files are stored in the `database/` folder:
 - `database/stock_alerts.db` - Main application database
@@ -30,7 +30,7 @@ All tables are stored in a single database:
 
 ```sql
 -- Daily OHLC data (backfill)
-CREATE TABLE ohlc_daily (
+CREATE TABLE stock_history (
   symbol TEXT NOT NULL,
   date TEXT NOT NULL,
   open REAL NOT NULL,
@@ -43,8 +43,8 @@ CREATE TABLE ohlc_daily (
   PRIMARY KEY(symbol, date)
 );
 
-CREATE INDEX idx_ohlc_daily_symbol_date 
-  ON ohlc_daily(symbol, date DESC);
+CREATE INDEX idx_stock_history_symbol_date 
+  ON stock_history(symbol, date DESC);
 
 -- Ingestion log (backfill tracking)
 CREATE TABLE ingestion_log (
@@ -126,12 +126,27 @@ CREATE TABLE ohlc_news_links (
 
 CREATE INDEX idx_ohlc_news_links_symbol_date 
   ON ohlc_news_links(symbol, date DESC);
+
+-- Top Gainers with News Summary
+CREATE TABLE top_gainers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol TEXT NOT NULL,
+  start_price REAL NOT NULL,
+  current_price REAL NOT NULL,
+  change_pct REAL NOT NULL,
+  news_summary TEXT,
+  detected_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_top_gainers_symbol_detected 
+  ON top_gainers(symbol, detected_at DESC);
 ```
 
 ## Table Usage
 
 ### Historical Data Tables
-- **`ohlc_daily`**: Stores daily OHLC price data
+- **`stock_history`**: Stores daily OHLC price data
   - Used by: `agents/backfill_agent.py`, `agents/eod_agent.py`
   - Read by: `agents/monitor_agent.py` (for day open prices)
 
@@ -159,13 +174,18 @@ CREATE INDEX idx_ohlc_news_links_symbol_date
   - Used by: `agents/historical_news_agent.py`
   - Read by: `agents/historical_news_agent.py` (for querying linked news)
 
+- **`top_gainers`**: Top gainers scraped from Yahoo Finance
+  - Used by: `agents/top_gainers_scrape_agent.py`
+  - Stores: symbol, start price, current price, change %, news summary (optional)
+  - Note: Old data is cleared and replaced with new data on each scrape
+
 ## Configuration
 
 In your `.env` file:
 
 ```bash
 # Single SQLite database for all data (stored in database/ folder)
-SQLITE_PATH=database/stock_alerts.db
+SQLITE_PATH=database/stock_analysis.db
 ```
 
 ## File Structure
@@ -173,7 +193,7 @@ SQLITE_PATH=database/stock_alerts.db
 ```
 Stock-Ayalyst/
 ├── database/
-│   ├── stock_alerts.db    # Main database with all tables
+│   ├── stock_analysis.db  # Main database with all tables
 │   └── state.sqlite       # CrewAI state (auto-created)
 ├── data/
 │   └── sector_map.json    # Sector mapping
@@ -204,7 +224,7 @@ Stock-Ayalyst/
 cp -r database/ backups/database_$(date +%Y%m%d_%H%M)/
 
 # Or backup just the main database
-cp database/stock_alerts.db backups/stock_alerts_$(date +%Y%m%d_%H%M).db
+cp database/stock_analysis.db backups/stock_analysis_$(date +%Y%m%d_%H%M).db
 ```
 
 ## Database Connection
@@ -218,7 +238,7 @@ Example:
 ```python
 from core.database import connect
 
-conn = connect("database/stock_alerts.db")
+conn = connect("database/stock_analysis.db")
 # All tables are available in this connection
 ```
 

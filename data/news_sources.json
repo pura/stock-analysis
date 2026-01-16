@@ -1,0 +1,104 @@
+{
+  "news_sources": {
+    "general_financial": [
+      {
+        "name": "Yahoo Finance Top Stories",
+        "rss_url": "https://finance.yahoo.com/rss/topstories"
+      },
+      {
+        "name": "MarketWatch Top Stories",
+        "rss_url": "https://feeds.marketwatch.com/marketwatch/topstories/"
+      },
+      {
+        "name": "CNBC Top News",
+        "rss_url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+      },
+      {
+        "name": "Nasdaq Markets",
+        "rss_url": "https://www.nasdaq.com/feed/rssoutbound?category=Markets"
+      },
+      {
+        "name": "Seeking Alpha Market News",
+        "rss_url": "https://seekingalpha.com/market_currents.xml"
+      },
+      {
+        "name": "Investopedia",
+        "rss_url": "https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_articles"
+      },
+      {
+        "name": "Benzinga",
+        "rss_url": "https://www.benzinga.com/feed"
+      }
+    ],
+    "stock_specific": {
+      "AAPL": [
+        {
+          "name": "Yahoo Finance AAPL",
+          "rss_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=AAPL&region=US&lang=en"
+        }
+      ],
+      "MSFT": [
+        {
+          "name": "Yahoo Finance MSFT",
+          "rss_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=MSFT&region=US&lang=en"
+        }
+      ],
+      "TSLA": [
+        {
+          "name": "Yahoo Finance TSLA",
+          "rss_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=TSLA&region=US&lang=en"
+        }
+      ],
+      "GOOGL": [
+        {
+          "name": "Yahoo Finance GOOGL",
+          "rss_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GOOGL&region=US&lang=en"
+        }
+      ]
+    },
+    "sector_specific": {
+      "Technology": [
+        {
+          "name": "TechCrunch",
+          "rss_url": "https://techcrunch.com/feed/"
+        },
+        {
+          "name": "The Verge",
+          "rss_url": "https://www.theverge.com/rss/index.xml"
+        },
+        {
+          "name": "Ars Technica",
+          "rss_url": "https://feeds.arstechnica.com/arstechnica/index"
+        }
+      ],
+      "Financial Services": [
+        {
+          "name": "American Banker",
+          "rss_url": "https://www.americanbanker.com/feed"
+        }
+      ]
+    },
+    "macro_economic": [
+      {
+        "name": "BBC World News",
+        "rss_url": "http://feeds.bbci.co.uk/news/world/rss.xml"
+      },
+      {
+        "name": "CNN World",
+        "rss_url": "http://rss.cnn.com/rss/edition_world.rss"
+      },
+      {
+        "name": "World Health Organization",
+        "rss_url": "https://www.who.int/rss-feeds/news-english.xml"
+      },
+      {
+        "name": "International Monetary Fund",
+        "rss_url": "https://www.imf.org/en/rss"
+      },
+      {
+        "name": "World Bank",
+        "rss_url": "https://www.worldbank.org/en/rss"
+      }
+    ]
+  }
+}

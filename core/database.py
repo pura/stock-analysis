@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 # Single database schema with all tables
 SCHEMA = """
 -- Daily OHLC data (historical/backfill)
-CREATE TABLE IF NOT EXISTS ohlc_daily (
+CREATE TABLE IF NOT EXISTS stock_history (
   symbol TEXT NOT NULL,
   date TEXT NOT NULL,
   open REAL NOT NULL,
@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS ohlc_daily (
   PRIMARY KEY(symbol, date)
 );
 
-CREATE INDEX IF NOT EXISTS idx_ohlc_daily_symbol_date 
-  ON ohlc_daily(symbol, date DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_history_symbol_date 
+  ON stock_history(symbol, date DESC);
 
 -- Ingestion log (backfill tracking)
 CREATE TABLE IF NOT EXISTS ingestion_log (
@@ -101,6 +101,21 @@ CREATE TABLE IF NOT EXISTS ohlc_news_links (
 
 CREATE INDEX IF NOT EXISTS idx_ohlc_news_links_symbol_date 
   ON ohlc_news_links(symbol, date DESC);
+
+-- Top Gainers with News Summary
+CREATE TABLE IF NOT EXISTS top_gainers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol TEXT NOT NULL,
+  start_price REAL NOT NULL,
+  current_price REAL NOT NULL,
+  change_pct REAL NOT NULL,
+  news_summary TEXT,
+  detected_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_top_gainers_symbol_detected 
+  ON top_gainers(symbol, detected_at DESC);
 """
 
 
@@ -129,7 +144,7 @@ def store_daily_ohlc(
     conn = connect(db_path)
     try:
         conn.execute(
-            """INSERT OR REPLACE INTO ohlc_daily 
+            """INSERT OR REPLACE INTO stock_history 
                (symbol, date, open, high, low, close, volume, source, ingested_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, date, open_price, high, low, close, volume, source, datetime.utcnow().isoformat())
@@ -153,12 +168,12 @@ def get_daily_ohlc(
     try:
         if date:
             cur = conn.execute(
-                "SELECT * FROM ohlc_daily WHERE symbol=? AND date=?",
+                "SELECT * FROM stock_history WHERE symbol=? AND date=?",
                 (symbol, date)
             )
         else:
             cur = conn.execute(
-                "SELECT * FROM ohlc_daily WHERE symbol=? ORDER BY date DESC LIMIT 1",
+                "SELECT * FROM stock_history WHERE symbol=? ORDER BY date DESC LIMIT 1",
                 (symbol,)
             )
         row = cur.fetchone()
@@ -421,7 +436,7 @@ def get_ohlc_with_news(
             SELECT o.symbol, o.date, o.open, o.close, 
                    ABS((o.close - o.open) / o.open * 100) as change_pct,
                    GROUP_CONCAT(n.title || '|' || n.url || '|' || onl.relevance_label, '|||') as news
-            FROM ohlc_daily o
+            FROM stock_history o
             LEFT JOIN ohlc_news_links onl ON o.symbol = onl.symbol AND o.date = onl.date
             LEFT JOIN news_items n ON onl.news_id = n.id
         """
@@ -463,6 +478,130 @@ def get_ohlc_with_news(
                 "close": row[3],
                 "change_pct": row[4],
                 "news": news_data
+            })
+        
+        return results
+    finally:
+        conn.close()
+
+
+def clear_top_gainers(db_path: str) -> bool:
+    """Clear all top gainers from database (for fresh scrape)."""
+    conn = connect(db_path)
+    try:
+        conn.execute("DELETE FROM top_gainers")
+        conn.commit()
+        logger.info("Cleared all top gainers from database")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing top gainers: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def store_top_gainer(
+    db_path: str,
+    symbol: str,
+    start_price: float,
+    current_price: float,
+    change_pct: float,
+    news_summary: Optional[str] = None
+) -> int:
+    """Store top gainer with news summary."""
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            """INSERT INTO top_gainers 
+               (symbol, start_price, current_price, change_pct, news_summary, detected_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                symbol,
+                start_price,
+                current_price,
+                change_pct,
+                news_summary,
+                datetime.utcnow().isoformat(),
+                datetime.utcnow().isoformat()
+            )
+        )
+        conn.commit()
+        return cur.lastrowid
+    except Exception as e:
+        logger.error(f"Error storing top gainer: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
+def store_top_gainers_batch(
+    db_path: str,
+    gainers: list[dict[str, Any]]
+) -> int:
+    """Store multiple top gainers in a batch. Returns count of stored records."""
+    conn = connect(db_path)
+    try:
+        count = 0
+        now = datetime.utcnow().isoformat()
+        for gainer in gainers:
+            try:
+                conn.execute(
+                    """INSERT INTO top_gainers 
+                       (symbol, start_price, current_price, change_pct, news_summary, detected_at, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        gainer["symbol"],
+                        gainer["start_price"],
+                        gainer["current_price"],
+                        gainer["change_pct"],
+                        gainer.get("news_summary"),
+                        now,
+                        now
+                    )
+                )
+                count += 1
+            except Exception as e:
+                logger.warning(f"Error storing gainer {gainer.get('symbol')}: {e}")
+        conn.commit()
+        return count
+    except Exception as e:
+        logger.error(f"Error in batch store: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
+def get_top_gainers(
+    db_path: str,
+    limit: int = 50,
+    min_change_pct: Optional[float] = None
+) -> list[dict[str, Any]]:
+    """Get top gainers from database."""
+    conn = connect(db_path)
+    try:
+        query = "SELECT * FROM top_gainers WHERE 1=1"
+        params = []
+        
+        if min_change_pct is not None:
+            query += " AND change_pct >= ?"
+            params.append(min_change_pct)
+        
+        query += " ORDER BY detected_at DESC LIMIT ?"
+        params.append(limit)
+        
+        cur = conn.execute(query, params)
+        
+        results = []
+        for row in cur.fetchall():
+            results.append({
+                "id": row[0],
+                "symbol": row[1],
+                "start_price": row[2],
+                "current_price": row[3],
+                "change_pct": row[4],
+                "news_summary": row[5],
+                "detected_at": row[6],
+                "created_at": row[7]
             })
         
         return results

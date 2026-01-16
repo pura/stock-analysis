@@ -1,0 +1,42 @@
+{
+  "AAPL": {
+    "name": "Apple",
+    "aliases": ["Apple Inc", "Apple Inc.", "Apple Computer", "iPhone", "iPad", "Mac", "iTunes"]
+  },
+  "MSFT": {
+    "name": "Microsoft",
+    "aliases": ["Microsoft Corp", "Microsoft Corporation", "Windows", "Azure", "Office", "Xbox"]
+  },
+  "GOOGL": {
+    "name": "Google",
+    "aliases": ["Google Inc", "Google LLC", "Alphabet", "Alphabet Inc", "YouTube", "Android", "Chrome"]
+  },
+  "GOOG": {
+    "name": "Google",
+    "aliases": ["Google Inc", "Google LLC", "Alphabet", "Alphabet Inc", "YouTube", "Android", "Chrome"]
+  },
+  "AMZN": {
+    "name": "Amazon",
+    "aliases": ["Amazon.com", "Amazon Inc", "AWS", "Prime", "Alexa"]
+  },
+  "TSLA": {
+    "name": "Tesla",
+    "aliases": ["Tesla Inc", "Tesla Motors", "Elon Musk", "Model S", "Model 3", "Model Y", "Model X"]
+  },
+  "META": {
+    "name": "Meta",
+    "aliases": ["Facebook", "Meta Platforms", "Instagram", "WhatsApp", "Oculus", "VR"]
+  },
+  "NVDA": {
+    "name": "NVIDIA",
+    "aliases": ["Nvidia Corp", "Nvidia Corporation", "GPU", "AI chips"]
+  },
+  "BARC.L": {
+    "name": "Barclays",
+    "aliases": ["Barclays Bank", "Barclays PLC", "Barclays Group"]
+  },
+  "TSCO.L": {
+    "name": "Tesco",
+    "aliases": ["Tesco PLC", "Tesco Stores"]
+  }
+}

@@ -103,7 +103,7 @@ SMTP_PASSWORD=your_app_password
 ALERT_EMAIL_TO=alerts@example.com
 
 # Database (stored in database/ folder)
-SQLITE_PATH=database/stock_alerts.db
+SQLITE_PATH=database/stock_analysis.db
 
 # Logging
 LOG_LEVEL=INFO
@@ -165,6 +165,11 @@ For production, use cron:
 0 17 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 -m agents.eod_agent >> /var/log/stock_alerts_eod.log 2>&1
 ```
 
+**Top Gainers Scraper (every 5 minutes during market hours):**
+```bash
+*/5 8-16 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 -m agents.top_gainers_scrape_agent >> /var/log/top_gainers_scrape.log 2>&1
+```
+
 ## Project Structure
 
 ```
@@ -175,6 +180,7 @@ Stock-Ayalyst/
 │   ├── monitor_agent.py          # Intraday price monitoring
 │   ├── news_agent.py             # News fetching for triggered tickers
 │   ├── historical_news_agent.py  # Historical news analysis for significant moves
+│   ├── top_gainers_scrape_agent.py  # Top gainers scraper (Yahoo Finance)
 │   ├── summarizer_agent.py       # CrewAI alert summarization
 │   └── eod_agent.py              # End-of-day processing
 ├── core/

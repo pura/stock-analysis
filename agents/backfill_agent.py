@@ -23,7 +23,7 @@ def backfill_symbol(api_key: str, symbol: str, days: int, db_path: str) -> bool:
     try:
         # Check if we already have data
         cur = conn.execute(
-            "SELECT COUNT(*) FROM ohlc_daily WHERE symbol=?",
+            "SELECT COUNT(*) FROM stock_history WHERE symbol=?",
             (symbol,)
         )
         existing_count = cur.fetchone()[0]

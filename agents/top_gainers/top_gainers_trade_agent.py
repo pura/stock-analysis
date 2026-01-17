@@ -215,8 +215,18 @@ def process_trade_signals(cfg: Config):
     invest_list = []
     buy_count = 0
     sell_count = 0
+    hold_count = 0
+    no_action_count = 0
     
-    for trend_data in trends:
+    # Print and log header
+    header = "\n" + "="*80 + "\n" + "TRADE SIGNALS FOR ALL SYMBOLS\n" + "="*80
+    table_header = f"{'#':<4} {'Symbol':<8} {'Name':<30} {'Trend':<6} {'Price':<10} {'Signal':<20} {'Action':<15}\n" + "-"*80
+    print(header)
+    print(table_header)
+    logger.info(header)
+    logger.info(table_header)
+    
+    for i, trend_data in enumerate(trends, start=1):
         symbol = trend_data["Symbol"]
         trend = trend_data["Trend"]
         price = trend_data.get("Price")
@@ -224,54 +234,95 @@ def process_trade_signals(cfg: Config):
         
         if not price:
             logger.warning(f"{symbol}: No price data, skipping")
+            no_data_line = f"{i:<4} {symbol:<8} {'N/A':<30} {'N/A':<6} {'N/A':<10} {'NO DATA':<20} {'SKIP':<15}"
+            print(no_data_line)
+            logger.info(no_data_line)
             continue
         
         # Get stock name
         name = get_stock_name(cfg.sqlite_path, symbol)
+        display_name = (name or 'N/A')[:28]  # Truncate if too long
+        
+        # Get open position status
+        open_position = get_open_position(cfg.sqlite_path, symbol)
+        
+        signal = ""
+        action = ""
+        action_taken = False
         
         if trend == "Up":
-            # If Up signal: if last record is NOT an open position, open a new position
-            # Otherwise, keep it as open (do nothing)
-            open_position = get_open_position(cfg.sqlite_path, symbol)
-            
             if not open_position:
                 # No open position exists, open a new position
                 record_buy(cfg.sqlite_path, symbol, name, float(price), scraped_at)
                 buy_count += 1
                 invest_list.append({"symbol": symbol, "name": name, "price": price})
+                signal = "🟢 BUY"
+                action = "NEW POSITION"
+                action_taken = True
                 logger.info(f"BUY signal: {symbol} - {name or 'N/A'} (Price: ${price:.2f}) - Opening new position")
-                print(f"INVEST: {symbol} - {name or 'N/A'} (Price: ${price:.2f})")
             else:
-                # Already have an open position, keep it as open (do nothing)
-                logger.debug(f"{symbol}: Trend is Up, position already open at ${open_position['buy_price']:.2f} - keeping position open")
+                # Already have an open position, keep it as open
+                buy_price = open_position['buy_price']
+                profit = price - buy_price
+                profit_pct = ((price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                signal = "🟢 BUY (HOLD)"
+                action = f"HOLD @ ${buy_price:.2f}"
+                hold_count += 1
+                logger.debug(f"{symbol}: Trend is Up, position already open at ${buy_price:.2f} - keeping position open")
         
         elif trend == "Down":
-            # If Down signal: close the position if it's open, otherwise do nothing
-            open_position = get_open_position(cfg.sqlite_path, symbol)
-            
             if open_position:
-                # Position is open, close it (record sale with timestamp)
+                # Position is open, close it
+                buy_price = open_position['buy_price']
                 record_sale(cfg.sqlite_path, open_position["id"], symbol, float(price), scraped_at)
                 sell_count += 1
-                logger.info(f"SELL signal: {symbol} at ${price:.2f} - Closing position (bought at ${open_position['buy_price']:.2f})")
+                profit = price - buy_price
+                profit_pct = ((price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                signal = "🔴 SELL"
+                action = f"CLOSE @ ${price:.2f}"
+                action_taken = True
+                logger.info(f"SELL signal: {symbol} at ${price:.2f} - Closing position (bought at ${buy_price:.2f}, profit: ${profit:.2f} ({profit_pct:+.2f}%))")
             else:
                 # No open position, nothing to close
+                signal = "🔴 SELL"
+                action = "NO POSITION"
+                no_action_count += 1
                 logger.debug(f"{symbol}: Trend is Down, but no open position to close - doing nothing")
+        
+        # Print and log signal for this symbol
+        signal_line = f"{i:<4} {symbol:<8} {display_name:<30} {trend:<6} ${price:<9.2f} {signal:<20} {action:<15}"
+        print(signal_line)
+        logger.info(signal_line)
     
-    # Summary
-    logger.info("="*60)
-    logger.info(f"Trade Signals Summary:")
-    logger.info(f"  Total symbols analyzed: {len(trends)}")
-    logger.info(f"  New BUY signals: {buy_count}")
-    logger.info(f"  SALE signals: {sell_count}")
-    logger.info(f"  Current INVEST list: {len(invest_list)} stocks")
-    logger.info("="*60)
+    # Print and log summary
+    summary_separator = "="*80
+    summary_header = "\n" + summary_separator + "\n" + "TRADE SIGNALS SUMMARY\n" + summary_separator
+    summary_lines = [
+        f"Total symbols analyzed: {len(trends)}",
+        f"🟢 New BUY signals (new positions opened): {buy_count}",
+        f"🟢 HOLD signals (positions maintained): {hold_count}",
+        f"🔴 SELL signals (positions closed): {sell_count}",
+        f"🔴 NO ACTION (no position to close): {no_action_count}",
+        f"Current open positions: {buy_count + hold_count}",
+        summary_separator
+    ]
+    
+    print(summary_separator)
+    print(summary_header)
+    for line in summary_lines:
+        print(line)
+        logger.info(line)
     
     if invest_list:
-        logger.info("INVEST List:")
+        invest_header = "\n" + summary_separator + "\n" + "NEW POSITIONS OPENED (INVEST NOW)\n" + summary_separator
+        print(invest_header)
+        logger.info(invest_header)
         for item in invest_list:
-            logger.info(f"  - {item['symbol']}: {item['name'] or 'N/A'} @ ${item['price']:.2f}")
-            print(f"INVEST: {item['symbol']} - {item['name'] or 'N/A'} (Price: ${item['price']:.2f})")
+            invest_line = f"🟢 BUY: {item['symbol']} - {item['name'] or 'N/A'} @ ${item['price']:.2f}"
+            print(invest_line)
+            logger.info(invest_line)
+        print(summary_separator)
+        logger.info(summary_separator)
 
 
 def main():

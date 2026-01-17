@@ -1,5 +1,5 @@
 """
-Most Active Trend Agent (Twelve Data)
+Top Gainers Trend Agent (Twelve Data)
 
 Requirements:
   pip install requests
@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import requests
 
@@ -28,10 +28,11 @@ from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
-TABLE_NAME = "yahoo_most_active"
-TREND_TABLE_NAME = "yahoo_most_active_trend"
+TABLE_NAME = "yahoo_top_gainers"
+TREND_TABLE_NAME = "yahoo_top_gainers_trend"
 
 TD_BASE = "https://api.twelvedata.com"
+# For UK - this is the example; requests.get("https://api.twelvedata.com/time_series?apikey=c7401b2f1f5a406d81af66f69c3d7788&symbol=0J3I&interval=30min&country=United Kingdom&exchange=LSE&type=stock&start_date=2026-01-16 11:30:00&end_date=2026-01-16 12:30:00&format=JSON&timezone=Europe/London")
 
 # US market time for "before 9:30 AM"
 try:
@@ -63,9 +64,9 @@ def init_trend_table(conn):
     conn.commit()
 
 
-def get_latest_25_most_active(db_path: str) -> List[str]:
+def get_latest_25_gainers(db_path: str) -> List[str]:
     """
-    Reads exactly the latest 25 from yahoo_most_active by max "Scraped At (UTC)".
+    Reads exactly the latest 25 from yahoo_top_gainers by max "Scraped At (UTC)".
     """
     conn = connect(db_path)
     try:
@@ -245,7 +246,7 @@ class TwelveDataClient:
     ) -> Dict[str, List[dict]]:
         """
         Returns: symbol -> list of bars (each bar dict has datetime/open/high/low/close/volume)
-        Supports bulk (comma-separated symbol list).
+        Supports bulk (comma-separated symbol list). :contentReference[oaicite:2]{index=2}
         """
         sym_param = ",".join(symbols)
         data = self._get(
@@ -368,10 +369,10 @@ def chunk(lst: List[str], n: int) -> List[List[str]]:
     return [lst[i:i+n] for i in range(0, len(lst), n)]
 
 
-def process_most_active_trends(cfg: Config) -> None:
-    symbols = get_latest_25_most_active(cfg.sqlite_path)
+def process_top_gainers_trends(cfg: Config) -> None:
+    symbols = get_latest_25_gainers(cfg.sqlite_path)
     if not symbols:
-        logger.warning("No most active stocks found in database (latest snapshot empty).")
+        logger.warning("No top gainers found in database (latest snapshot empty).")
         return
 
     now_utc = datetime.now(timezone.utc)
@@ -382,7 +383,7 @@ def process_most_active_trends(cfg: Config) -> None:
     td = TwelveDataClient(cfg.twelve_data_api_key)
 
     # Twelve Data Basic plan is limited; keep batches modest.
-    # Batch endpoint supports many symbols, but your credits/min are limited.
+    # Batch endpoint supports many symbols, but your credits/min are limited. :contentReference[oaicite:3]{index=3}
     # We'll do 5 symbols per request to be safe.
     BATCH_SIZE = 5
 
@@ -441,12 +442,12 @@ def process_most_active_trends(cfg: Config) -> None:
 
 
 def main():
-    setup_logging("INFO", "most_active_trend_twelvedata.log")
+    setup_logging("INFO", "top_gainers_trend_twelvedata.log")
     try:
         cfg = Config.from_env()
         if not getattr(cfg, "twelve_data_api_key", None):
             raise RuntimeError("Missing Twelve Data API key: set TWELVE_DATA_API_KEY in your env/config.")
-        process_most_active_trends(cfg)
+        process_top_gainers_trends(cfg)
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)

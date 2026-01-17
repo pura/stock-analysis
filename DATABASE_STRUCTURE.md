@@ -174,10 +174,27 @@ CREATE INDEX idx_top_gainers_symbol_detected
   - Used by: `agents/historical_news_agent.py`
   - Read by: `agents/historical_news_agent.py` (for querying linked news)
 
-- **`top_gainers`**: Top gainers scraped from Yahoo Finance
-  - Used by: `agents/top_gainers_scrape_agent.py`
-  - Stores: symbol, start price, current price, change %, news summary (optional)
+- **`yahoo_top_gainers`**: Top gainers scraped from Yahoo Finance
+  - Used by: `agents/top_gainers/top_gainers_scrape_agent.py`
+  - Stores: Symbol, Name, Price, Change, Change %, Volume, Avg Vol (3M), Market Cap, P/E Ratio (TTM), 52 Wk Change %
   - Note: Old data is cleared and replaced with new data on each scrape
+
+- **`yahoo_top_gainers_trend`**: Price trend analysis for top gainers
+  - Used by: `agents/top_gainers/top_gainers_trend_agent.py`
+  - Stores: Symbol, Trend (Up/Down), Start Price, 2 hrs, 1.5 hrs, 1 hr, 30 mins, Now
+
+- **`yahoo_top_gainers_trades`**: Buy/sell trade records
+  - Used by: `agents/top_gainers/top_gainers_trade_agent.py`
+  - Stores: symbol, name, buy_price, buy_time, sale_price, sale_time
+
+- **`yahoo_most_active`**: Most active stocks scraped from Yahoo Finance
+  - Used by: `agents/most_active/most_active_scrape_agent.py`
+  - Stores: Same columns as yahoo_top_gainers
+  - Note: Excludes stocks already in top_gainers and stocks with negative change
+
+- **`yahoo_most_active_trend`**: Price trend analysis for most active stocks
+  - Used by: `agents/most_active/most_active_trend_agent.py`
+  - Stores: Same structure as yahoo_top_gainers_trend
 
 ## Configuration
 

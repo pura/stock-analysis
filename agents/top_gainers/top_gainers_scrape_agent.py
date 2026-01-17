@@ -17,10 +17,11 @@ import requests
 from bs4 import BeautifulSoup
 
 # Import config to get database path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.config import Config
 
 YAHOO_GAINERS_URL = "https://finance.yahoo.com/markets/stocks/gainers/"
+# For UK: YAHOO_GAINERS_URL = "https://uk.finance.yahoo.com/research-hub/screener/day_gainers_gb/" 
 TABLE_NAME = "yahoo_top_gainers"
 
 

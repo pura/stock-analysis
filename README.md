@@ -165,10 +165,15 @@ For production, use cron:
 0 17 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 -m agents.eod_agent >> /var/log/stock_alerts_eod.log 2>&1
 ```
 
-**Top Gainers Scraper (every 5 minutes during market hours):**
+**Top Gainers Pipeline (every 30 minutes during market hours):**
 ```bash
-*/5 8-16 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 -m agents.top_gainers_scrape_agent >> /var/log/top_gainers_scrape.log 2>&1
+*/30 8-16 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 runner/run_top_gainers_pipeline.py >> /var/log/top_gainers_pipeline.log 2>&1
 ```
+
+This runs all three agents in sequence:
+1. `top_gainers_scrape_agent` - Scrapes top gainers from Yahoo Finance
+2. `top_gainers_trend_agent` - Analyzes price trends
+3. `top_gainers_trade_agent` - Generates buy/sell signals
 
 ## Project Structure
 
@@ -180,9 +185,17 @@ Stock-Ayalyst/
 │   ├── monitor_agent.py          # Intraday price monitoring
 │   ├── news_agent.py             # News fetching for triggered tickers
 │   ├── historical_news_agent.py  # Historical news analysis for significant moves
-│   ├── top_gainers_scrape_agent.py  # Top gainers scraper (Yahoo Finance)
 │   ├── summarizer_agent.py       # CrewAI alert summarization
-│   └── eod_agent.py              # End-of-day processing
+│   ├── eod_agent.py              # End-of-day processing
+│   ├── top_gainers/
+│   │   ├── __init__.py
+│   │   ├── top_gainers_scrape_agent.py  # Top gainers scraper (Yahoo Finance)
+│   │   ├── top_gainers_trend_agent.py   # Price trend analysis
+│   │   └── top_gainers_trade_agent.py   # Buy/sell signal generation
+│   └── most_active/
+│       ├── __init__.py
+│       ├── most_active_scrape_agent.py  # Most active scraper (Yahoo Finance)
+│       └── most_active_trend_agent.py   # Price trend analysis
 ├── core/
 │   ├── __init__.py
 │   ├── config.py               # Configuration management

@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
+from math import fsum
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 TABLE_NAME = "yahoo_most_active"
 TREND_TABLE_NAME = "yahoo_most_active_trend"
+TRADES_TABLE_NAME = "yahoo_most_active_trades"
 
 TD_BASE = "https://api.twelvedata.com"
 
@@ -351,17 +353,199 @@ def compute_prices(
     return prices
 
 
-def determine_trend(prices: Dict[str, Optional[float]]) -> str:
+def _linear_regression_slope_and_r2(y: List[float]) -> Tuple[float, float]:
     """
-    Up if latest price > start price AND > 2hrs price, else Down.
-    If missing, Down (conservative, and matches "Down otherwise").
+    Simple OLS of y on x where x = 0..n-1.
+    Returns (slope, r2).
     """
-    now_p = prices.get("Now")
-    start_p = prices.get("Start Price")
-    two_p = prices.get("2 hrs")
-    if now_p is None or start_p is None or two_p is None:
-        return "Down"
-    return "Up" if (now_p > start_p and now_p > two_p) else "Down"
+    n = len(y)
+    if n < 2:
+        return 0.0, 0.0
+
+    x = list(range(n))
+    x_mean = (n - 1) / 2.0
+    y_mean = fsum(y) / n
+
+    # Cov(x,y) and Var(x)
+    num = 0.0
+    den = 0.0
+    for xi, yi in zip(x, y):
+        dx = xi - x_mean
+        dy = yi - y_mean
+        num += dx * dy
+        den += dx * dx
+
+    if den == 0.0:
+        return 0.0, 0.0
+
+    slope = num / den
+    intercept = y_mean - slope * x_mean
+
+    # R^2
+    ss_tot = 0.0
+    ss_res = 0.0
+    for xi, yi in zip(x, y):
+        y_hat = intercept + slope * xi
+        ss_tot += (yi - y_mean) ** 2
+        ss_res += (yi - y_hat) ** 2
+
+    r2 = 0.0 if ss_tot == 0.0 else 1.0 - (ss_res / ss_tot)
+    return slope, r2
+
+
+def compute_trend_from_slope(
+    bars: List[Dict[str, object]],
+    n: int = 10,
+    min_abs_slope_pct_per_bar: float = 0.0,
+    min_r2: float = 0.0,
+) -> bool:
+    """
+    Calculates trend using the slope of a trendline over last N bars.
+    Returns True if trend is UP, False otherwise.
+
+    bars: list of dicts, each should contain at least {"close": "..."}.
+          Assumes bars are in ascending time order (oldest -> newest).
+    n: number of latest bars to use (if fewer exist, uses what is available).
+    min_abs_slope_pct_per_bar: optional noise filter; require slope/avg_price >= this.
+    min_r2: optional fit-quality filter; require r2 >= this.
+
+    Note: slope is in "price units per bar". We convert to percent-per-bar vs avg price.
+    With very few bars (1-3), uses simple price comparison instead of regression.
+    """
+    closes = []
+    for b in bars:
+        c = safe_float(b.get("close"))
+        if c is not None:
+            closes.append(c)
+
+    if len(closes) < 1:
+        return False  # no data => treat as not-up
+
+    # If only 1 bar, can't determine trend
+    if len(closes) == 1:
+        return False
+
+    # If 2 bars, use simple comparison
+    if len(closes) == 2:
+        return closes[1] > closes[0]
+
+    # Use available bars (up to n)
+    y = closes[-n:] if len(closes) > n else closes[:]
+    num_bars = len(y)
+
+    # For 3 bars, use simple comparison (regression with 3 points is less reliable)
+    if num_bars == 3:
+        return y[2] > y[0]  # latest > first
+
+    # For 4+ bars, use linear regression
+    slope, r2 = _linear_regression_slope_and_r2(y)
+
+    avg_price = fsum(y) / len(y)
+    if avg_price == 0:
+        return False
+
+    slope_pct_per_bar = slope / avg_price  # e.g. 0.001 == +0.1% per bar
+
+    # Adjust filters based on number of bars (more lenient with fewer bars)
+    # With 4-5 bars, R² can be less reliable, so lower the threshold
+    adjusted_min_r2 = min_r2 if num_bars >= 6 else (min_r2 * 0.5 if num_bars >= 4 else 0.0)
+    
+    if r2 < adjusted_min_r2:
+        return False
+
+    if slope_pct_per_bar <= 0:
+        return False
+
+    # Adjust slope filter (more lenient with fewer bars)
+    adjusted_min_slope = min_abs_slope_pct_per_bar if num_bars >= 6 else (min_abs_slope_pct_per_bar * 0.5 if num_bars >= 4 else 0.0)
+    
+    if slope_pct_per_bar < adjusted_min_slope:
+        return False
+
+    return True
+
+
+def get_open_position_price(db_path: str, symbol: str) -> Optional[float]:
+    """Get the buy_price of the most recent open position (buy without sale) for a symbol."""
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            f'''
+            SELECT buy_price
+            FROM "{TRADES_TABLE_NAME}"
+            WHERE symbol = ? AND sale_price IS NULL AND sale_time IS NULL
+            ORDER BY buy_time DESC
+            LIMIT 1
+            ''',
+            (symbol,)
+        )
+        row = cur.fetchone()
+        return safe_float(row[0]) if row and row[0] else None
+    except Exception:
+        # Table might not exist yet, return None
+        return None
+    finally:
+        conn.close()
+
+
+def determine_trend(
+    bars_30m: List[dict],
+    prices: Dict[str, Optional[float]],
+    db_path: str,
+    symbol: str,
+    n: int = 10,
+    min_abs_slope_pct_per_bar: float = 0.0002,
+    min_r2: float = 0.15,
+) -> str:
+    """
+    Determines trend based on:
+    1. If open_position price exists:
+       - If latest price < (trade price + 0.5%) => Down
+       - Else if trend is up (from slope) => Up
+       - Else => Down
+    2. If open_position price does not exist:
+       - If trend is up (from slope) => Up
+       - Else => Down
+
+    Trend is computed using slope over last N bars (or all available bars if fewer than N).
+    Works with as few as 2 bars (uses simple comparison) or 4+ bars (uses linear regression).
+    """
+    """
+    Determines trend based on:
+    1. If open_position price exists:
+       - If latest price < (trade price + 0.5%) => Down
+       - Else if trend is up (from slope) => Up
+       - Else => Down
+    2. If open_position price does not exist:
+       - If trend is up (from slope) => Up
+       - Else => Down
+
+    Trend is computed using slope over last N bars.
+    """
+    latest_price = prices.get("Now")
+    if latest_price is None:
+        return "Down"  # no price => conservative
+
+    # Get open position price if exists
+    trade_price = get_open_position_price(db_path, symbol)
+
+    # Calculate trend from slope
+    trend_up = compute_trend_from_slope(
+        bars_30m,
+        n=n,
+        min_abs_slope_pct_per_bar=min_abs_slope_pct_per_bar,
+        min_r2=min_r2,
+    )
+
+    if trade_price is not None:
+        # Open position exists
+        threshold = trade_price * (1.0 + 0.005)  # trade price + 0.5%
+        if latest_price < threshold:
+            return "Down"
+        return "Up" if trend_up else "Down"
+    else:
+        # No open position
+        return "Up" if trend_up else "Down"
 
 
 def chunk(lst: List[str], n: int) -> List[List[str]]:
@@ -411,7 +595,7 @@ def process_most_active_trends(cfg: Config) -> None:
             daily_bars = daily_map.get(sym, []) or []
 
             prices = compute_prices(bars_30m, daily_bars, now_utc)
-            trend = determine_trend(prices)
+            trend = determine_trend(bars_30m, prices, cfg.sqlite_path, sym)
 
             row = {
                 "Symbol": sym,

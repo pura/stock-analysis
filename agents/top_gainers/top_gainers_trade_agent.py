@@ -124,6 +124,12 @@ def get_open_position(db_path: str, symbol: str) -> Optional[Dict]:
         conn.close()
 
 
+def has_latest_buy(db_path: str, symbol: str) -> bool:
+    """Check if the latest trade record for a symbol is already a buy (open position)."""
+    open_position = get_open_position(db_path, symbol)
+    return open_position is not None
+
+
 def record_buy(db_path: str, symbol: str, name: Optional[str], price: float, buy_time: str):
     """Record a buy signal."""
     conn = connect(db_path)
@@ -224,30 +230,33 @@ def process_trade_signals(cfg: Config):
         name = get_stock_name(cfg.sqlite_path, symbol)
         
         if trend == "Up":
-            # Check if we already have an open position
+            # If Up signal: if last record is NOT an open position, open a new position
+            # Otherwise, keep it as open (do nothing)
             open_position = get_open_position(cfg.sqlite_path, symbol)
             
             if not open_position:
-                # New buy signal - record it
+                # No open position exists, open a new position
                 record_buy(cfg.sqlite_path, symbol, name, float(price), scraped_at)
                 buy_count += 1
                 invest_list.append({"symbol": symbol, "name": name, "price": price})
+                logger.info(f"BUY signal: {symbol} - {name or 'N/A'} (Price: ${price:.2f}) - Opening new position")
                 print(f"INVEST: {symbol} - {name or 'N/A'} (Price: ${price:.2f})")
             else:
-                # Already have a position, just log
-                logger.debug(f"{symbol}: Trend is Up, already have open position at ${open_position['buy_price']:.2f}")
+                # Already have an open position, keep it as open (do nothing)
+                logger.debug(f"{symbol}: Trend is Up, position already open at ${open_position['buy_price']:.2f} - keeping position open")
         
         elif trend == "Down":
-            # Check if we have an open position to sell
+            # If Down signal: close the position if it's open, otherwise do nothing
             open_position = get_open_position(cfg.sqlite_path, symbol)
             
             if open_position:
-                # Record sale
+                # Position is open, close it (record sale with timestamp)
                 record_sale(cfg.sqlite_path, open_position["id"], symbol, float(price), scraped_at)
                 sell_count += 1
+                logger.info(f"SELL signal: {symbol} at ${price:.2f} - Closing position (bought at ${open_position['buy_price']:.2f})")
             else:
-                # No open position, nothing to sell
-                logger.debug(f"{symbol}: Trend is Down, but no open position to sell")
+                # No open position, nothing to close
+                logger.debug(f"{symbol}: Trend is Down, but no open position to close - doing nothing")
     
     # Summary
     logger.info("="*60)

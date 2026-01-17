@@ -509,33 +509,37 @@ def determine_trend(
 
     Trend is computed using slope over last N bars (or all available bars if fewer than N).
     Works with as few as 2 bars (uses simple comparison) or 4+ bars (uses linear regression).
-    """
-    """
-    Determines trend based on:
-    1. If open_position price exists:
-       - If latest price < (trade price + 0.5%) => Down
-       - Else if trend is up (from slope) => Up
-       - Else => Down
-    2. If open_position price does not exist:
-       - If trend is up (from slope) => Up
-       - Else => Down
-
-    Trend is computed using slope over last N bars.
+    If insufficient intraday data (all prices same), falls back to Start Price vs Now comparison.
     """
     latest_price = prices.get("Now")
+    start_price = prices.get("Start Price")
+    
     if latest_price is None:
         return "Down"  # no price => conservative
 
     # Get open position price if exists
     trade_price = get_open_position_price(db_path, symbol)
 
-    # Calculate trend from slope
-    trend_up = compute_trend_from_slope(
-        bars_30m,
-        n=n,
-        min_abs_slope_pct_per_bar=min_abs_slope_pct_per_bar,
-        min_r2=min_r2,
-    )
+    # Check if we have sufficient intraday data variation
+    # If all historical prices are the same, bars might not have enough variation
+    price_values = [prices.get("2 hrs"), prices.get("1.5 hrs"), prices.get("1 hr"), 
+                   prices.get("30 mins"), prices.get("Now")]
+    unique_prices = set([p for p in price_values if p is not None])
+    has_price_variation = len(unique_prices) > 1
+    
+    # Calculate trend from slope if we have bars
+    trend_up = False
+    if bars_30m and len(bars_30m) > 1:
+        trend_up = compute_trend_from_slope(
+            bars_30m,
+            n=n,
+            min_abs_slope_pct_per_bar=min_abs_slope_pct_per_bar,
+            min_r2=min_r2,
+        )
+    elif start_price is not None and latest_price is not None:
+        # Fallback: if no bars or insufficient data, use Start vs Now comparison
+        trend_up = latest_price > start_price
+        logger.debug(f"{symbol}: Using fallback Start vs Now comparison (Start={start_price:.2f}, Now={latest_price:.2f})")
 
     if trade_price is not None:
         # Open position exists
@@ -565,34 +569,67 @@ def process_most_active_trends(cfg: Config) -> None:
 
     td = TwelveDataClient(cfg.twelve_data_api_key)
 
-    # Twelve Data Basic plan is limited; keep batches modest.
-    # Batch endpoint supports many symbols, but your credits/min are limited.
-    # We'll do 5 symbols per request to be safe.
+    # Twelve Data Basic plan is limited to 8 API credits per minute.
+    # Each batch request uses credits, so we process 5 symbols at a time,
+    # then wait 62 seconds to ensure we're within the rate limit.
     BATCH_SIZE = 5
+    WAIT_BETWEEN_BATCHES = 62  # seconds - wait to avoid rate limits
 
     rows_to_store: List[Dict[str, object]] = []
 
     # 1) Fetch daily bars (outputsize=1) for prev close
     daily_map: Dict[str, List[dict]] = {}
-    for batch in chunk(symbols, BATCH_SIZE):
-        logger.info(f"Fetching DAILY (1day) for batch: {batch}")
+    batches = list(chunk(symbols, BATCH_SIZE))
+    total_batches = len(batches)
+    
+    logger.info(f"Starting DAILY data fetch for {len(symbols)} symbols in {total_batches} batches...")
+    for i, batch in enumerate(batches, start=1):
+        logger.info(f"Fetching DAILY (1day) for batch {i}/{total_batches}: {batch}")
         resp = td.time_series_batch(batch, interval="1day", outputsize=1, order="ASC")
         daily_map.update(resp)
-        time.sleep(0.25)  # gentle pacing
+        
+        # Wait between batches (always wait, including after last batch before switching to INTRADAY)
+        if i < total_batches:
+            logger.info(f"Waiting {WAIT_BETWEEN_BATCHES} seconds before next DAILY batch to avoid rate limits...")
+            time.sleep(WAIT_BETWEEN_BATCHES)
+    
+    # Wait before starting INTRADAY phase to ensure rate limit reset
+    logger.info(f"DAILY data fetch completed. Waiting {WAIT_BETWEEN_BATCHES} seconds before starting INTRADAY data fetch...")
+    time.sleep(WAIT_BETWEEN_BATCHES)
 
     # 2) Fetch intraday 30m bars (enough bars to cover 2 hours + buffer)
     intraday_map: Dict[str, List[dict]] = {}
     # outputsize 20 = 10 hours of 30m bars max; plenty
-    for batch in chunk(symbols, BATCH_SIZE):
-        logger.info(f"Fetching INTRADAY (30min) for batch: {batch}")
+    
+    logger.info(f"Starting INTRADAY data fetch for {len(symbols)} symbols in {total_batches} batches...")
+    for i, batch in enumerate(batches, start=1):
+        logger.info(f"Fetching INTRADAY (30min) for batch {i}/{total_batches}: {batch}")
         resp = td.time_series_batch(batch, interval="30min", outputsize=20, order="ASC")
         intraday_map.update(resp)
-        time.sleep(0.25)
+        
+        # Wait between batches (except after the last one)
+        if i < total_batches:
+            logger.info(f"Waiting {WAIT_BETWEEN_BATCHES} seconds before next INTRADAY batch to avoid rate limits...")
+            time.sleep(WAIT_BETWEEN_BATCHES)
 
     for i, sym in enumerate(symbols, start=1):
         try:
             bars_30m = intraday_map.get(sym, []) or []
             daily_bars = daily_map.get(sym, []) or []
+
+            # Log bar count for debugging
+            num_bars = len(bars_30m)
+            if num_bars > 0:
+                bar_closes = [safe_float(b.get("close")) for b in bars_30m if safe_float(b.get("close")) is not None]
+                if len(bar_closes) >= 2:
+                    first_close = bar_closes[0]
+                    last_close = bar_closes[-1]
+                    price_change = ((last_close - first_close) / first_close * 100) if first_close > 0 else 0
+                    logger.debug(f"{sym}: {num_bars} bars, first_close={first_close:.2f}, last_close={last_close:.2f}, change={price_change:+.2f}%")
+                else:
+                    logger.debug(f"{sym}: {num_bars} bars, but only {len(bar_closes)} valid closes")
+            else:
+                logger.warning(f"{sym}: No intraday bars available")
 
             prices = compute_prices(bars_30m, daily_bars, now_utc)
             trend = determine_trend(bars_30m, prices, cfg.sqlite_path, sym)
@@ -610,10 +647,16 @@ def process_most_active_trends(cfg: Config) -> None:
             }
             rows_to_store.append(row)
 
+            # Check if all historical prices are the same (indicates data issue)
+            price_values = [prices.get("2 hrs"), prices.get("1.5 hrs"), prices.get("1 hr"), prices.get("30 mins"), prices.get("Now")]
+            unique_prices = set([p for p in price_values if p is not None])
+            if len(unique_prices) == 1 and num_bars > 1:
+                logger.warning(f"{sym}: All historical prices are identical ({unique_prices.pop():.2f}) - may indicate insufficient intraday data")
+
             logger.info(
                 f"[{i:02d}/{len(symbols)}] {sym} Trend={trend} "
                 f"Start={row['Start Price']} 2hrs={row['2 hrs']} 1.5hrs={row['1.5 hrs']} "
-                f"1hr={row['1 hr']} 30m={row['30 mins']} Now={row['Now']}"
+                f"1hr={row['1 hr']} 30m={row['30 mins']} Now={row['Now']} (bars={num_bars})"
             )
 
         except Exception as e:

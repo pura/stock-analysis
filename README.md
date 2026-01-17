@@ -1,18 +1,14 @@
-# Stock Alert System MVP
+# Top Gainers Stock Trading System
 
-A low-noise stock monitoring system using CrewAI and Twelve Data API with deterministic signal detection and intelligent alert summarization.
+An automated stock trading system that scrapes top gainers from Yahoo Finance, analyzes price trends, and generates buy/sell signals using Twelve Data API.
 
 ## Features
 
-- **Multi-market support**: US (AAPL, MSFT) and UK (BARC.L) tickers
-- **Historical backfill**: Automatic 1-year daily OHLC data download
-- **Intraday monitoring**: 30-minute interval price monitoring during market hours
-- **Deterministic signals**: Price moves, volume spikes, breakouts/breakdowns
-- **Noise control**: Smart throttling and cooldown mechanisms
-- **News context**: Automatic news fetching for triggered tickers only
-- **Historical news analysis**: Analyzes backfilled data and fetches news for significant price moves (>=5%)
-- **AI summarization**: CrewAI-powered alert generation
-- **Email alerts**: Configurable email delivery
+- **Top Gainers Scraping**: Automatically scrapes top 25 gainers from Yahoo Finance every 5 minutes
+- **Trend Analysis**: Analyzes intraday price trends using linear regression slope calculation
+- **Trade Signals**: Generates clear BUY/SELL signals based on trend analysis and position tracking
+- **Data Archiving**: Automatically archives old data while keeping today's data active
+- **Rate Limit Handling**: Smart batching and waiting to respect API rate limits
 
 ## Quick Start
 
@@ -25,243 +21,233 @@ pip install -r requirements.txt
 ### 2. Get API Key
 
 - Sign up at [Twelve Data](https://twelvedata.com/pricing)
-- Get your free API key (800 requests/day on free tier)
+- Get your free API key (8 API credits per minute on free tier)
 
-### 3. Configure Email
+### 3. Configure Environment
 
-**For Gmail:**
-1. Enable 2-Factor Authentication
-2. Generate App Password: https://myaccount.google.com/apppasswords
-3. Use App Password (not regular password) in `.env`
-
-### 4. Create Configuration
-
-```bash
-cp .env.example .env
-# Edit .env with your values
-```
-
-**Minimum required:**
-```bash
-TWELVE_DATA_API_KEY=your_key_here
-WATCHLIST=AAPL,MSFT,GOOGL
-SMTP_USER=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-ALERT_EMAIL_TO=alerts@example.com
-```
-
-### 5. Run Initial Backfill
-
-```bash
-python -m agents.backfill_agent
-```
-
-### 6. Test Monitoring
-
-```bash
-python main.py
-```
-
-### 7. Set Up Automation
-
-See [QUICK_START.md](QUICK_START.md) for detailed cron/systemd setup.
-
-## Detailed Setup
-
-### Configure Environment
-
-Create a `.env` file (see `.env.example` for template):
+Create a `.env` file:
 
 ```bash
 # Twelve Data API
 TWELVE_DATA_API_KEY=your_api_key_here
-
-# Watchlist (comma-separated, supports US and UK tickers)
-WATCHLIST=AAPL,MSFT,GOOGL,BARC.L,TSCO.L
-
-# Historical Data
-HISTORY_DAYS=365  # Calendar days (default: 365, can use 252 for trading days)
-
-# Signal Thresholds
-MOVE_PCT=1.5  # Percentage change from day open to trigger
-VOLUME_SPIKE_MULT=2.0  # Volume multiplier for spike detection
-BREAKOUT_LOOKBACK=20  # Bars to look back for breakout/breakdown
-
-# Alert Throttling
-MIN_ALERT_GAP_MIN=60  # Minimum minutes between alerts for same symbol
-RE_ALERT_STEP_PCT=0.5  # Additional % move to re-alert in same direction
-
-# Market Hours (Europe/London timezone)
-MARKET_OPEN_HOUR=8  # Market open hour (24h format)
-MARKET_CLOSE_HOUR=16  # Market close hour (24h format)
-
-# Email Configuration
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-ALERT_EMAIL_TO=alerts@example.com
 
 # Database (stored in database/ folder)
 SQLITE_PATH=database/stock_analysis.db
 
 # Logging
 LOG_LEVEL=INFO
-LOG_FILE=stock_alerts.log
 ```
 
-### 3. Sector Mapping (Optional)
+### 4. Run the Pipeline
 
-Create `sector_map.json`:
-
-```json
-{
-  "AAPL": "Technology",
-  "MSFT": "Technology",
-  "GOOGL": "Technology",
-  "BARC.L": "Financial Services",
-  "TSCO.L": "Consumer Goods"
-}
+**Manual run:**
+```bash
+python3 -m runner.run_top_gainers_pipeline
 ```
 
-### 4. Run Initial Backfill
+**Run individual agents:**
+```bash
+# Scrape top gainers
+python3 -m agents.top_gainers.top_gainers_scrape_agent
+
+# Analyze trends
+python3 -m agents.top_gainers.top_gainers_trend_agent
+
+# Generate trade signals
+python3 -m agents.top_gainers.top_gainers_trade_agent
+
+# Cleanup old data (keeps only today's data)
+python3 -m agents.top_gainers.top_gainers_cleanup_agent
+```
+
+## How Each Agent Works
+
+### 1. Top Gainers Scrape Agent (`top_gainers_scrape_agent.py`)
+
+**What it does:**
+- Scrapes Yahoo Finance's top gainers page (https://finance.yahoo.com/markets/stocks/gainers/)
+- Extracts top 25 stocks with their details (Symbol, Name, Price, Change %, Volume, etc.)
+- Stores data in `yahoo_top_gainers` table
+- Updates existing records or inserts new ones based on Symbol
+
+**Key features:**
+- Runs every 5 minutes (via cron or manually)
+- Handles HTML parsing and data extraction
+- Updates database with latest scraped data
+
+### 2. Top Gainers Trend Agent (`top_gainers_trend_agent.py`)
+
+**What it does:**
+- Reads latest top gainers from database
+- Fetches intraday price data (30-minute bars) from Twelve Data API
+- Calculates price trends using linear regression slope analysis
+- Determines if trend is "Up" or "Down" based on:
+  - Slope of price trendline over last N bars
+  - Open position status (if exists, checks if price dropped below buy price + 0.5%)
+- Stores trend data in `yahoo_top_gainers_trend` table
+
+**Key features:**
+- Processes 5 symbols per batch with 62-second waits to avoid rate limits
+- Uses mathematical trendline analysis (not just simple price comparison)
+- Handles cases with few bars (2-3 bars use simple comparison, 4+ use regression)
+- Falls back to Start Price vs Now comparison if insufficient intraday data
+
+### 3. Top Gainers Trade Agent (`top_gainers_trade_agent.py`)
+
+**What it does:**
+- Reads latest trend data from database
+- Generates buy/sell signals:
+  - **BUY**: If trend is "Up" and no open position exists → opens new position
+  - **HOLD**: If trend is "Up" and position already open → keeps position open
+  - **SELL**: If trend is "Down" and position is open → closes position
+  - **NO ACTION**: If trend is "Down" and no position → does nothing
+- Records all trades in `yahoo_top_gainers_trades` table
+- Prints clear formatted table showing all 25 symbols with their signals
+
+**Key features:**
+- Prevents duplicate buys (only opens position if one doesn't exist)
+- Tracks profit/loss when closing positions
+- Provides clear visual output with emojis (🟢 BUY, 🔴 SELL)
+- Logs all signals to file for historical analysis
+
+### 4. Top Gainers Cleanup Agent (`top_gainers_cleanup_agent.py`)
+
+**What it does:**
+- Archives old data from all top gainers tables to archive tables
+- Deletes old records (anything not from today) from main tables
+- Keeps only today's data in active tables for performance
+- Preserves historical data in archive tables for analysis
+
+**Key features:**
+- Archives before deleting (data is preserved)
+- Cleans three tables: `yahoo_top_gainers`, `yahoo_top_gainers_trend`, `yahoo_top_gainers_trades`
+- Adds `archived_at` timestamp to track when data was archived
+- Should run daily at 8 AM (before market opens)
+
+## Automated Scheduling (Cron)
+
+### Setup Cron Jobs
+
+Edit your crontab:
+```bash
+crontab -e
+```
+
+### 1. Daily Cleanup (8:00 AM)
+
+Runs cleanup agent every day at 8:00 AM to archive old data:
 
 ```bash
-python -m agents.backfill_agent
+# Cleanup old data at 8 AM every day
+0 8 * * * cd /Users/puraskarsapkota/Projects/Stock-Ayalyst && /usr/bin/python3 -m agents.top_gainers.top_gainers_cleanup_agent >> ~/top_gainers_cleanup.log 2>&1
 ```
 
-This downloads and stores 1 year of daily OHLC data for all tickers in your watchlist.
+### 2. Pipeline Runner (Every 30 Minutes During Market Hours)
 
-### 4a. (Optional) Analyze Historical News
-
-After backfilling, you can analyze historical data and fetch news for days with significant price moves (>=5%):
+Runs the complete pipeline every 30 minutes from market open (9:30 AM ET) to market close (4:00 PM ET), only on weekdays:
 
 ```bash
-python -m agents.historical_news_agent
+# Run pipeline every 30 minutes from 9:30 AM to 4:00 PM ET, weekdays only
+30,0 9-16 * * 1-5 cd /Users/puraskarsapkota/Projects/Stock-Ayalyst && /usr/bin/python3 -m runner.run_top_gainers_pipeline >> ~/top_gainers_pipeline.log 2>&1
 ```
 
-This will:
-- Scan all backfilled OHLC data
-- Find days where daily change >= 5%
-- Fetch news articles from those dates
-- Link news to the historical OHLC records in the database
+**Note:** Adjust the timezone in cron if your server is not in ET timezone. For example:
+- **ET timezone**: `30,0 9-16 * * 1-5` (9:30 AM - 4:00 PM ET)
+- **UTC timezone**: `30,0 14-21 * * 1-5` (9:30 AM - 4:00 PM ET = 2:30 PM - 9:00 PM UTC in winter)
 
-### 5. Start Monitoring
+### Alternative: Run Scrape Agent More Frequently
 
-For development/testing:
+If you want to scrape more frequently (every 5 minutes) but run trend/trade analysis every 30 minutes:
+
 ```bash
-python main.py
+# Scrape every 5 minutes during market hours
+*/5 9-16 * * 1-5 cd /Users/puraskarsapkota/Projects/Stock-Ayalyst && /usr/bin/python3 -m agents.top_gainers.top_gainers_scrape_agent >> ~/top_gainers_scrape.log 2>&1
+
+# Run trend + trade analysis every 30 minutes
+30,0 9-16 * * 1-5 cd /Users/puraskarsapkota/Projects/Stock-Ayalyst && /usr/bin/python3 -m agents.top_gainers.top_gainers_trend_agent >> ~/top_gainers_trend.log 2>&1 && /usr/bin/python3 -m agents.top_gainers.top_gainers_trade_agent >> ~/top_gainers_trade.log 2>&1
 ```
 
-For production, use cron:
+## Pipeline Flow
 
-**Every 30 minutes during market hours:**
-```bash
-*/30 8-16 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 main.py >> /var/log/stock_alerts.log 2>&1
+```
+1. Scrape Agent (every 5-30 mins)
+   ↓
+   Scrapes Yahoo Finance → Stores in yahoo_top_gainers table
+   
+2. Trend Agent (every 30 mins)
+   ↓
+   Reads top gainers → Fetches intraday data from Twelve Data → Calculates trends → Stores in yahoo_top_gainers_trend table
+   
+3. Trade Agent (every 30 mins)
+   ↓
+   Reads trends → Generates buy/sell signals → Records trades in yahoo_top_gainers_trades table → Prints signals
+   
+4. Cleanup Agent (daily at 8 AM)
+   ↓
+   Archives old data → Deletes from main tables → Keeps only today's data
 ```
 
-**Daily end-of-day job (after market close):**
-```bash
-0 17 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 -m agents.eod_agent >> /var/log/stock_alerts_eod.log 2>&1
-```
+## Database Tables
 
-**Top Gainers Pipeline (every 30 minutes during market hours):**
-```bash
-*/30 8-16 * * 1-5 cd /path/to/Stock-Ayalyst && /usr/bin/python3 runner/run_top_gainers_pipeline.py >> /var/log/top_gainers_pipeline.log 2>&1
-```
+- **`yahoo_top_gainers`**: Current day's scraped top gainers data
+- **`yahoo_top_gainers_trend`**: Current day's trend analysis results
+- **`yahoo_top_gainers_trades`**: All buy/sell trade records
+- **`yahoo_top_gainers_archive`**: Archived historical gainers data
+- **`yahoo_top_gainers_trend_archive`**: Archived historical trend data
+- **`yahoo_top_gainers_trades_archive`**: Archived historical trades
 
-This runs all three agents in sequence:
-1. `top_gainers_scrape_agent` - Scrapes top gainers from Yahoo Finance
-2. `top_gainers_trend_agent` - Analyzes price trends
-3. `top_gainers_trade_agent` - Generates buy/sell signals
+## Log Files
+
+- `top_gainers_scrape.log` - Scrape agent logs
+- `top_gainers_trend_twelvedata.log` - Trend agent logs
+- `top_gainers_trade.log` - Trade agent logs
+- `top_gainers_cleanup.log` - Cleanup agent logs
+- `top_gainers_pipeline.log` - Pipeline runner logs
 
 ## Project Structure
 
 ```
 Stock-Ayalyst/
 ├── agents/
-│   ├── __init__.py
-│   ├── backfill_agent.py         # Historical OHLC backfill
-│   ├── monitor_agent.py          # Intraday price monitoring
-│   ├── news_agent.py             # News fetching for triggered tickers
-│   ├── historical_news_agent.py  # Historical news analysis for significant moves
-│   ├── summarizer_agent.py       # CrewAI alert summarization
-│   ├── eod_agent.py              # End-of-day processing
-│   ├── top_gainers/
-│   │   ├── __init__.py
-│   │   ├── top_gainers_scrape_agent.py  # Top gainers scraper (Yahoo Finance)
-│   │   ├── top_gainers_trend_agent.py   # Price trend analysis
-│   │   └── top_gainers_trade_agent.py   # Buy/sell signal generation
-│   └── most_active/
-│       ├── __init__.py
-│       ├── most_active_scrape_agent.py  # Most active scraper (Yahoo Finance)
-│       └── most_active_trend_agent.py   # Price trend analysis
+│   └── top_gainers/
+│       ├── top_gainers_scrape_agent.py   # Scrapes Yahoo Finance
+│       ├── top_gainers_trend_agent.py    # Analyzes price trends
+│       ├── top_gainers_trade_agent.py    # Generates buy/sell signals
+│       └── top_gainers_cleanup_agent.py  # Archives old data
+├── runner/
+│   └── run_top_gainers_pipeline.py       # Runs all agents in sequence
 ├── core/
-│   ├── __init__.py
-│   ├── config.py               # Configuration management
-│   ├── database.py             # Database schema and operations
-│   ├── signals.py              # Deterministic signal detection
-│   └── email.py                # Email delivery
+│   ├── config.py                          # Configuration management
+│   └── database.py                        # Database operations
 ├── utils/
-│   ├── __init__.py
-│   ├── market_hours.py         # Market hours utilities
-│   └── logging_config.py      # Logging setup
-├── data/
-│   └── sector_map.json         # Sector mapping (optional)
-├── main.py                     # Main monitoring entry point
+│   └── logging_config.py                  # Logging setup
+├── database/
+│   └── stock_analysis.db                  # SQLite database
 ├── requirements.txt
-├── .env                        # Environment variables (create this)
+├── .env                                   # Environment variables
 └── README.md
 ```
 
-## How It Works
-
-1. **Backfill**: Downloads 1 year of daily OHLC data on first run
-2. **Monitoring**: Every 30 minutes:
-   - Fetches latest 30-min bars
-   - Computes signals (price vs day open, volume, breakout)
-   - Checks throttling rules
-   - For triggered tickers: fetches news
-   - Generates alert summary via CrewAI
-   - Sends email if alerts exist
-3. **End of Day**: Stores final daily OHLC and runs integrity checks
-
-## Signal Types
-
-- **move_from_open**: Price moved X% from today's opening price
-- **volume_spike**: Volume exceeds average by multiplier
-- **breakout**: Price breaks above N-bar high
-- **breakdown**: Price breaks below N-bar low
-
-## Alert Throttling
-
-- No duplicate alerts for same symbol+signal+bar
-- Minimum gap between alerts (configurable)
-- Re-alerts only if:
-  - Direction flips
-  - Price moves additional step % in same direction
-  - Cooldown expired with increased severity
-
-## Logging
-
-Logs are written to both console and file (`stock_alerts.log`). Log levels:
-- DEBUG: Detailed execution flow
-- INFO: Normal operations
-- WARNING: Recoverable issues
-- ERROR: Errors requiring attention
-
 ## Troubleshooting
 
-### Rate Limits
-If you hit Twelve Data rate limits, the system will log warnings and retry with backoff.
+### Rate Limit Errors
 
-### Missing Symbols
-UK tickers must include `.L` suffix (e.g., `BARC.L`). Check logs for symbol validation errors.
+If you see "run out of API credits" errors:
+- The trend agent automatically waits 62 seconds between batches
+- Each batch processes 5 symbols
+- With 25 symbols, it takes ~10 minutes to complete
 
-### Email Not Sending
-- Verify SMTP credentials
-- For Gmail, use App Password (not regular password)
-- Check firewall/network settings
+### No Trend Data
+
+- Ensure scrape agent has run and populated `yahoo_top_gainers` table
+- Check that Twelve Data API key is valid
+- Verify market is open (trend agent needs intraday data)
+
+### Database Issues
+
+- Database is stored in `database/stock_analysis.db`
+- Archive tables preserve historical data
+- Cleanup agent runs daily to keep main tables clean
 
 ## License
 
